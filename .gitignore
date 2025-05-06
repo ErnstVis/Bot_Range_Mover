@@ -3,4 +3,4 @@
 
 # Игнорируем тестовый файл
 private.txt
-small_progs/output.png
+*.png
