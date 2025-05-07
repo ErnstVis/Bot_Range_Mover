@@ -1,4 +1,5 @@
 import math
+import random
 
 def price_normalize(P, x10 = 0, level = '', pr = 0):
     tick = math.log(P) / math.log(1.0001)
@@ -88,57 +89,78 @@ print('Ammount 0:', result1b, result2b)
 
 
 # Start values
-am_0 = 0  # weth
+am_0 = 0.5 # weth
 am_1 = 1000 # usdc
-P = P_max = P_min = 1800
+P = P_max = P_min = 2000
 
 # params
 qty_shift = 0.3 
-range_shift = 100
+range_shift = 50
 range_inc = 0
 range_dec = 0
-last_dir = 1
+last_dir = 0
 
-# Step swap and move up
-if last_dir:
-    am_0 = qty_shift * am_1 / P
-    am_1 = am_1 * (1 - qty_shift)
-    P_max = P_max + range_shift
-    P_min = calc_range_min(P_max, P, am_0, am_1)
-else:
-    am_1 = qty_shift * am_0 * P
-    am_0 = am_0 * (1 - qty_shift)
-    P_min = P_min - range_shift
-    P_max = calc_range_max(P_min, P, am_0, am_1)
+a0 = am_0 + am_1 / P
+a1 = am_1 + am_0 * P
 
-print('Entering to pool')
-print('P_min:', P_min)
-print('P:', P)
-print('P_max:', P_max)
-print('Ammount0:', am_0, ' |  Ammount1:', am_1)
-print()
-print('Exiting from pool')
 
-L = am_1 / (math.sqrt(P) - math.sqrt(P_min))
+# Can be innterated
+for i in range(20):
+    # Step swap and move up
+    if last_dir == 1:
+        am_0 = qty_shift * am_1 / P
+        am_1 = am_1 * (1 - qty_shift)
+        P_max = P_max + range_shift
+        P_min = calc_range_min(P_max, P, am_0, am_1)
+    elif last_dir == -1:
+        am_1 = qty_shift * am_0 * P
+        am_0 = am_0 * (1 - qty_shift)
+        P_min = P_min - range_shift
+        P_max = calc_range_max(P_min, P, am_0, am_1)
+    else:
+        P_max = P_max + range_shift
+        P_min = calc_range_min(P_max, P, am_0, am_1)
 
-new_dir = 1     # random fn or waiting for price change
-if new_dir:
-    P = P_max
-    am_1 = L * (math.sqrt(P) - math.sqrt(P_min))
-    am_0 = 0
-    print('Autoexit by max level.')
-else:
-    P = P_min
-    am_0 = L * (math.sqrt(P_max) - math.sqrt(P)) / (math.sqrt(P_max) * math.sqrt(P))
-    am_1 = 0
-    print('Autoexit by min level.')
-if new_dir == last_dir:
-    range_shift = range_shift + range_inc
-else:
-    range_shift = range_shift - range_dec
-last_dir = new_dir
-print('Ammount0:', am_0, ' |  Ammount1:', am_1)
+    print('Entering to pool')
+    print('P_min:', P_min)
+    print('P:', P)
+    print('P_max:', P_max)
+    print('Ammount0:', am_0, ' |  Ammount1:', am_1)
+    print()
+    print('Exiting from pool')
 
+    L = am_1 / (math.sqrt(P) - math.sqrt(P_min))
+
+    if random.randint(0, 1) == 1:
+        new_dir = 1
+    else:
+        new_dir = -1
+
+    if new_dir == 1:
+        P = P_max
+        am_1 = L * (math.sqrt(P) - math.sqrt(P_min))
+        am_0 = 0
+        print('Autoexit by max level.')
+    elif new_dir == -1:
+        P = P_min
+        am_0 = L * (math.sqrt(P_max) - math.sqrt(P)) / (math.sqrt(P_max) * math.sqrt(P))
+        am_1 = 0
+        print('Autoexit by min level.')
+    if new_dir == last_dir:
+        range_shift = range_shift + range_inc
+    else:
+        range_shift = range_shift - range_dec
+    last_dir = new_dir
+    print('Ammount0:', am_0, ' |  Ammount1:', am_1)
+    print('Interation:', i + 1)
+    print('=============================================================================')
+print('Ammount0 theory:', a0, ' |  Ammount1 theory:', a1)
+print('Change 0:', am_0 / a0 * 100, '% |  Change 1:', am_1 / a1 * 100, '%')
+print('new P:', P)
+
+# TESTED 1500>>>3500    profit 136..140 /1000   13.5%
+# TESTED 3500>>>1500    profit 0.09 /0.667      13.5%
+# TESTED 3500<><>, 1500<><>          ???        -15.7%
 
 # TEST pool moving
 '''
