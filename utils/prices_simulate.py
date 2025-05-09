@@ -19,7 +19,7 @@ for _ in range(iterations):
 # Визуализация
 plt.figure(figsize=(12, 6))
 plt.plot(prices, label="Симулированная цена")
-plt.title("Эмуляция движения цены на основе случайных изменений на ±1%")
+plt.title("Эмуляция движения цены на основе случайного блуждания")
 plt.xlabel("Итерации")
 plt.ylabel("Цена")
 plt.grid(True)
