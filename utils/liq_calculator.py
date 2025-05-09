@@ -93,7 +93,8 @@ print('Ammount 0:', result1b, result2b)
 
 
 # params
-qty_shift = 0.3 
+qty_shift_up = 0.3
+qty_shift_down = 0.3 
 range_inc = 30
 range_dec = 20
 range_max = 500
@@ -105,8 +106,9 @@ range_min = 30
 
 
 # cycle params
-avrg = 0
-avrg_i = 1
+avrg_time = 0
+avrg_bal_change = 0
+avrg_i = 20
 j = 50
 
 
@@ -119,8 +121,8 @@ for i in range(avrg_i):                         # Repeat for collect average los
     P = 2000
     P_start = P
     am_1_start = am_1
-    am_0 = qty_shift * am_1 / P
-    am_1 = am_1 * (1 - qty_shift)
+    am_0 = qty_shift_up * am_1 / P
+    am_1 = am_1 * (1 - qty_shift_up)
     print('Ammount0:', am_0, ' |  Ammount1:', am_1)
     P_max = P + range_shift
     P_min = calc_range_min(P_max, P, am_0, am_1)
@@ -128,9 +130,13 @@ for i in range(avrg_i):                         # Repeat for collect average los
     prices_max = [P_max]
     prices_min = [P_min]
     prices = [P]
+    balances = [am_1 + am_0 * P]
+    times = [0.0]
     count = 0
+    count_2 = 0
 
     while count < j:
+        count_2 += 1
         if (P - P_start) / P_start * 100 > 100:         # Correct, if random walk goes too far
             x = -0.001                                  #
         elif (P - P_start) / P_start * 100 < -50:       #
@@ -153,8 +159,8 @@ for i in range(avrg_i):                         # Repeat for collect average los
             am_1 = L * (math.sqrt(P_max) - math.sqrt(P_min))
             am_0 = 0                                            # Exit from pool
             print('Autoexit by max level.')
-            am_0 = qty_shift * am_1 / P                         # Rebalance ammounts
-            am_1 = am_1 * (1 - qty_shift)
+            am_0 = qty_shift_up * am_1 / P                         # Rebalance ammounts
+            am_1 = am_1 * (1 - qty_shift_up)
             P_max = P + range_shift                             # Set new range
             P_min = calc_range_min(P_max, P, am_0, am_1)
 
@@ -172,8 +178,8 @@ for i in range(avrg_i):                         # Repeat for collect average los
             am_0 = L * (math.sqrt(P_max) - math.sqrt(P_min)) / (math.sqrt(P_max) * math.sqrt(P_min))
             am_1 = 0                                            # Exit from pool
             print('Autoexit by min level.')
-            am_1 = qty_shift * am_0 * P                         # Rebalance ammounts  
-            am_0 = am_0 * (1 - qty_shift)
+            am_1 = qty_shift_down * am_0 * P                         # Rebalance ammounts  
+            am_0 = am_0 * (1 - qty_shift_down)
             P_min = P - range_shift                             # Set new range
             P_max = calc_range_max(P_min, P, am_0, am_1)
         else:
@@ -186,7 +192,7 @@ for i in range(avrg_i):                         # Repeat for collect average los
         print('P_min:', P_min, 'P:', P, 'P_max:', P_max)
         print('Ammount0:', am_0, ' |  Ammount1:', am_1)
         print('P start:', P_start, 'P now:', P, '========================>>> P change:', (P - P_start) / P_start * 100, '%')
-        print('Interation:', count + 1, 'Epoch:', i + 1)
+        print('Interation:', count + 1, 'Epoch:', i + 1, 'Time:', count_2)
         print('Balance in start:', am_1_start, 'Balance now:', am_1 + am_0 * P, '========================>>> Change:', bal_change, '%')
         print('-----------------------------------------------------------------------------')
         count += 1 
@@ -195,26 +201,43 @@ for i in range(avrg_i):                         # Repeat for collect average los
             prices_max.append(P_max)
             prices_min.append(P_min)
             prices.append(P)
+            balances.append(am_1 + am_0 * P)
+            times.append(float(count_2))
 
-    avrg += bal_change
-print('Average:', avrg / avrg_i, '%')
+    avrg_bal_change += bal_change
+    avrg_time += count_2
+
+print('Average values. Balance change:', avrg_bal_change / avrg_i, '% Times:', avrg_time / avrg_i)
 
 
 
-plt.figure(figsize=(12, 6))
-plt.plot(prices_max, 'o', label="Max")
-plt.plot(prices_min, 'o', label="Min")
-plt.plot(prices, label="P")
-plt.title("Emulated ranges movement")
-plt.xlabel("Interations")
-plt.ylabel("Price")
-plt.grid(True)
-plt.legend()
-plt.savefig('pictures/pool_sim_' + str(random.randint(1000, 9999)) + '.png')
 
-# TESTED 1500>>>3500    profit 136..140 /1000   13.5%
-# TESTED 3500>>>1500    profit 0.09 /0.667      13.5%
-# TESTED 3500<><>, 1500<><>          ???        -15.7%
+fig, ax1 = plt.subplots(figsize=(12, 6))
+
+ax1.plot(prices_max, 'o', label="Max", color='blue')
+ax1.plot(prices_min, 'o', label="Min", color='orange')
+ax1.plot(prices, label="P", color='green')
+ax1.set_xlabel("Iterations")
+ax1.set_ylabel("Price", color='black')
+ax1.tick_params(axis='y', labelcolor='black')
+ax1.grid(True)
+ax1.legend(loc="upper left")
+
+ax2 = ax1.twinx()
+ax2.plot(balances, label="Balance", color='red', linestyle='--')
+ax2.plot([t * (max(balances) / max(times)) for t in times], label="Time", color='black', linestyle='--')
+ax2.set_ylabel("Balance", color='red')
+ax2.tick_params(axis='y', labelcolor='red')
+ax2.legend(loc="upper right")
+
+# Заголовок и сохранение
+plt.title("Simulation. Avrg loss: " + str(round(avrg_bal_change / avrg_i)) + "% RngInc: " + str(range_inc) + " RngDec: " + str(range_dec) + " BalUp: " + str(qty_shift_up) + " BalDwn: " + str(qty_shift_down))
+plt.savefig('pictures/pool_sim__' + str(random.randint(1000, 9999)) + '.png')
+
+
+
+
+
 
 # TEST pool moving
 '''
