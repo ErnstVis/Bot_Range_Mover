@@ -1,0 +1,10 @@
+{
+    "rpc": "https://arb1.arbitrum.io/rpc",
+
+    "uniswap_factory": "0x1F98431c8aD98523631AE4a59f267346ea31F984",
+    "uniswap_router": "0xE592427A0AEce92De3Edee1F18E0157C05861564",
+    "uniswap_quoter": "0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6",
+
+    "weth": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1",
+    "usdc": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831"
+}

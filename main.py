@@ -1,13 +1,8 @@
-import core.uniswap_fn as uni
-from dotenv import load_dotenv
-import os
+from utils.botcore import LiqPos, ChainLink
 
 
 
-
-load_dotenv("private/secrets.env")
-main_address = os.getenv("MAIN_ADR")
-print(main_address)
-
-
-print(uni.test)
+chain = ChainLink('arbitrum', 'weth', 'usdc', 'uniswap', 'test', 500)
+chain.get_balance_native()
+chain.get_balance_token(0)
+chain.get_balance_token(1)
