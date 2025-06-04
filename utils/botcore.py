@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 from web3 import Web3
+from web3.exceptions import TimeExhausted
 import os
 import math
 import random
@@ -48,15 +49,15 @@ class ChainLink:
         else:
             print("Not connected!")
         print(self.address_token0, self.address_token1)
-        self.contract_token0 = self.connection.eth.contract(address = self.address_token0, abi = self.abi_token)
-        self.contract_token1 = self.connection.eth.contract(address = self.address_token1, abi = self.abi_token)
-        self.contract_factory = self.connection.eth.contract(address = self.address_factory, abi = self.abi_factory)
-        self.contract_router = self.connection.eth.contract(address = self.address_router, abi = self.abi_router)
-        self.contract_quoter = self.connection.eth.contract(address = self.address_quoter, abi = self.abi_quoter)
+        self.contract_token0 = self.connection.eth.contract(address=self.address_token0, abi=self.abi_token)
+        self.contract_token1 = self.connection.eth.contract(address=self.address_token1, abi=self.abi_token)
+        self.contract_factory = self.connection.eth.contract(address=self.address_factory, abi=self.abi_factory)
+        self.contract_router = self.connection.eth.contract(address=self.address_router, abi=self.abi_router)
+        self.contract_quoter = self.connection.eth.contract(address=self.address_quoter, abi=self.abi_quoter)
         self.address_pool = self.contract_factory.functions.getPool(self.address_token0, self.address_token1, fee).call()
         self.address_pool_test = self.contract_factory.functions.getPool(self.address_token1, self.address_token0, fee).call()
         print(f"Address pool: {self.address_pool}")                         # set contracts
-        self.contract_pool = self.connection.eth.contract(address = self.address_pool, abi = self.abi_pool)
+        self.contract_pool = self.connection.eth.contract(address=self.address_pool, abi=self.abi_pool)
     
     def get_balance_native(self):
         balance = self.connection.eth.get_balance(self.address_wallet)
@@ -79,48 +80,72 @@ class ChainLink:
         elif token == 1:
             self.balance_token1 = balance_token
 
+    def send_native(self, amount, wait=0):
+        amount_in_wei = self.connection.to_wei(amount, "ether")
+        nonce = self.connection.eth.get_transaction_count(self.address_wallet)
+        gas_price = self.connection.eth.gas_price
+        print(f"Recomended gas price: {self.connection.from_wei(gas_price, 'gwei')} Gwei")
+        if gas_price > 1000000000000:
+            print('Gas price very high')
+        chain_id = self.connection.eth.chain_id
+        transaction = {
+            "to": self.address_withdraw,
+            "value": amount_in_wei,
+            "gas": 21000,
+            "gasPrice": int(gas_price * 1.05),
+            "nonce": nonce,
+            "chainId": chain_id,}
+        signed_transaction = self.connection.eth.account.sign_transaction(transaction, self.key_wallet)
+        tx_hash = self.connection.eth.send_raw_transaction(signed_transaction.raw_transaction)
+        print(f"Transaction sent! Hash: {self.connection.to_hex(tx_hash)}")
+        if wait:
+            try:
+                print("Waiting for transaction receipt...")
+                receipt = self.connection.eth.wait_for_transaction_receipt(tx_hash, timeout=120, poll_latency=2)
+                if receipt and receipt.get("status") == 1:
+                    print("Done!", receipt.get("blockNumber"))
+                    return 1
+                else:
+                    print("Rejected!")
+                    return 0
+            except TimeExhausted:
+                print("Transaction timed out!")
+                return 9
 
-    # def send_native(self, token, amount,    connection, address_from, address_to, private_key):
-    #     amount_in_wei = connection.to_wei(amount, "ether")
-    #     nonce = connection.eth.get_transaction_count(address_from)
-    #     gas_price = connection.eth.gas_price
-    #     print(f"Recomended gas price: {connection.from_wei(gas_price, 'gwei')} Gwei")
-    #     gas_price = int(gas_price * 1.1)
-    #     if gas_price > 1000000000000:
-    #         print('Gas price very high')
-    #     transaction = {
-    #         "to": address_to,
-    #         "value": amount_in_wei,
-    #         "gas": 21000,
-    #         "gasPrice": gas_price,
-    #         "nonce": nonce,
-    #         "chainId": 137,}
-    #     signed_transaction = connection.eth.account.sign_transaction(transaction, private_key)
-    #     tx_hash = connection.eth.send_raw_transaction(signed_transaction.raw_transaction)
-    #     print(f"Transaction sent! Hash: {connection.to_hex(tx_hash)}")
-    #     return tx_hash
-
-# ============================================================= work to corrections
-
-# def send_token(amount, connection, token, address_from, address_to, private_key):
-#     decimals = token.functions.decimals().call()
-#     amount_scaled = int(amount * 10**decimals)
-#     nonce = connection.eth.get_transaction_count(address_from)
-#     gas_price = connection.eth.gas_price
-#     print(f"Recomended gas price: {connection.from_wei(gas_price, 'gwei')} Gwei")
-#     gas_price = int(gas_price * 1.1)
-#     if gas_price > 1000000000000:
-#         print('Gas price very high')
-#         exit()
-#     transaction = token.functions.transfer(address_to, amount_scaled).build_transaction({
-#         "chainId": 137,
-#         "gas": 210000,
-#         "gasPrice": gas_price,
-#         "nonce": nonce,})
-#     signed_transaction = connection.eth.account.sign_transaction(transaction, private_key)
-#     tx_hash = connection.eth.send_raw_transaction(signed_transaction.raw_transaction)
-#     print(f"Transaction sent! Hash: {connection.to_hex(tx_hash)}")
-#     return tx_hash
+    def send_token(self, amount, token, wait=0):
+        if token:
+            contract_token = self.contract_token1
+        else:
+            contract_token = self.contract_token0
+        decimals = contract_token.functions.decimals().call()
+        amount_scaled = int(amount * 10**decimals)
+        nonce = self.connection.eth.get_transaction_count(self.address_wallet)
+        gas_price = self.connection.eth.gas_price
+        print(f"Recomended gas price: {self.connection.from_wei(gas_price, 'gwei')} Gwei")
+        if gas_price > 1000000000000:
+            print('Gas price very high')
+        chain_id = self.connection.eth.chain_id
+        transaction = contract_token.functions.transfer(self.address_withdraw, amount_scaled).build_transaction({
+            "gas": 210000,
+            "gasPrice": int(gas_price * 1.05),
+            "nonce": nonce,
+            "chainId": chain_id,})
+        signed_transaction = self.connection.eth.account.sign_transaction(transaction, self.key_wallet)
+        tx_hash = self.connection.eth.send_raw_transaction(signed_transaction.raw_transaction)
+        print(f"Transaction sent! Hash: {self.connection.to_hex(tx_hash)}")
+        if wait:
+            try:
+                print("Waiting for transaction receipt...")
+                receipt = self.connection.eth.wait_for_transaction_receipt(tx_hash, timeout=120, poll_latency=2)
+                if receipt and receipt.get("status") == 1:
+                    print("Done!", receipt.get("blockNumber"))
+                    return 1
+                else:
+                    print("Rejected!")
+                    return 0
+            except TimeExhausted:
+                print("Transaction timed out!")
+                return 9
 
 
 # def approve_token(amount, connection, token_cont, wallet, address_from, private_key):
