@@ -18,6 +18,16 @@ chain.get_balance_token(1)
 #     i += 1
 #     print('not ok, trying again', i)
 
-chain.send_token(0.1, 1, wait=1)
+
+
+# chain.send_token(0.1, 1, wait=1)
+
+# chain.approve_token(0.1, 1, wait=1)
+
+print(chain.get_pool_teo_price())
+print(chain.decimals0, chain.decimals1)
+
+chain.scan_liquidity()
+
 
 
