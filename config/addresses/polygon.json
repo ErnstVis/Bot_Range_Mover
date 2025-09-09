@@ -4,6 +4,7 @@
     "uniswap_factory": "0x1F98431c8aD98523631AE4a59f267346ea31F984",
     "uniswap_router": "0xE592427A0AEce92De3Edee1F18E0157C05861564",
     "uniswap_quoter": "0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6",
+    "uniswap_manager": "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
 
     "weth": "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619",
     "usdc": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",

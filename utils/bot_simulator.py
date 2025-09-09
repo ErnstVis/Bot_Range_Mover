@@ -1,5 +1,5 @@
 # version 0.0.1
-from botcore import LiqPos, ChainLink
+from botcore import BotPos, ChainLink
 import matplotlib.pyplot as plt
 from datetime import datetime
 import time
@@ -23,7 +23,7 @@ for i in range(avrg_i):                                     # Repeat for collect
     count_deals = 0
     count_time = 0
     last_dir = 1
-    pos1 = LiqPos(0, 2500, test_option)                     # reinit
+    pos1 = BotPos(0, 2500, test_option)                     # reinit
     start_bal_tok0 = pos1.amm0 + pos1.amm1 / pos1.P_act_normal
     start_bal_tok1 = pos1.amm1 + pos1.amm0 * pos1.P_act_normal
     pos1.proc_shift("UT")
