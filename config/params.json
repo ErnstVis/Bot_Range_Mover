@@ -6,7 +6,5 @@
     "range_width_max": 1000,
     "range_width_min": 50,
     "range_width_init": 150,
-    "reference_price": 2000,
-    "token0": "ETH",
-    "token1": "USDC"
+    "reference_price": 2000
 }

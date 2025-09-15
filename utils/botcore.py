@@ -6,6 +6,10 @@ import os
 import math
 import random
 import json
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
+from sqlalchemy.orm import declarative_base, sessionmaker
+from datetime import datetime
+import random
 
 class ChainLink:
     def __init__(self, blockchain, token0, token1, proto, wallet, fee):
@@ -54,7 +58,7 @@ class ChainLink:
             print("Connected!")
         else:
             print("Not connected!")
-        print(self.address_token0, self.address_token1)
+        print('Address my:', self.address_wallet)
         self.fee = fee                                                      # set contracts
         self.contract_token0 = self.connection.eth.contract(address=self.address_token0, abi=self.abi_token)
         self.contract_token1 = self.connection.eth.contract(address=self.address_token1, abi=self.abi_token)
@@ -63,7 +67,7 @@ class ChainLink:
         self.contract_quoter = self.connection.eth.contract(address=self.address_quoter, abi=self.abi_quoter)
         self.contract_manager = self.connection.eth.contract(address=self.address_manager, abi=self.abi_manager)
         self.address_pool = self.contract_factory.functions.getPool(self.address_token0, self.address_token1, fee).call()
-        print(f"Address pool: {self.address_pool}")
+        print('Address pool:', self.address_pool)
         self.contract_pool = self.connection.eth.contract(address=self.address_pool, abi=self.abi_pool)
         self.address_token0_pool = self.contract_pool.functions.token0().call()                 # set additional parameters
         self.address_token1_pool = self.contract_pool.functions.token1().call()
@@ -97,6 +101,7 @@ class ChainLink:
             self.balance_token0 = balance_token
         elif token == 1:
             self.balance_token1 = balance_token
+        return balance_token
 
     def send_native(self, amount, wait=1):
         amount_in_wei = self.connection.to_wei(amount, "ether")
@@ -191,6 +196,7 @@ class ChainLink:
             self.current_price = (1 / price) * 10**(self.decimals0 - self.decimals1)
         else:
             self.current_price = price * 10**(self.decimals0 - self.decimals1)
+        print('Current price:', self.current_price)
         return self.current_tick, self.current_price
 
     def get_liquidity(self, tick=None):
@@ -240,38 +246,42 @@ class ChainLink:
 
     def get_swap_ammount_quoter(self, amount, token, by='I'):
         if token:
-            amount_scaled = int(amount * (10**self.decimals0))
             tokenIn = self.address_token0
             tokenOut = self.address_token1
         else:
-            amount_scaled = int(amount * (10**self.decimals1))
             tokenIn = self.address_token1
             tokenOut = self.address_token0
+        if (token == 0 and by == 'I') or (token == 1 and by == 'Q'):
+            amount_scaled = int(amount * (10**self.decimals1))
+        elif (token == 0 and by == 'Q') or (token == 1 and by == 'I'):
+            amount_scaled = int(amount * (10**self.decimals0))
         if by == 'I':
             amount_row = self.contract_quoter.functions.quoteExactInputSingle(
             tokenIn, tokenOut, self.fee, amount_scaled, 0
             ).call()
-        elif by == 'O':
+        elif by == 'Q':
             amount_row = self.contract_quoter.functions.quoteExactOutputSingle(
             tokenIn, tokenOut, self.fee, amount_scaled, 0
             ).call()
-        if token:
-            ammount_norm = amount_row / (10 ** self.decimals1)
-        else:
+        if (token == 0 and by == 'I') or (token == 1 and by == 'Q'):
             ammount_norm = amount_row / (10 ** self.decimals0)
+        elif (token == 0 and by == 'Q') or (token == 1 and by == 'I'):
+            ammount_norm = amount_row / (10 ** self.decimals1)
         return ammount_norm
 
     def get_swap_ammount_router(self, amount, amount_lim, token, by='I', deadline=60, wait=1):
         if token:
-            amount_scaled = int(amount * (10**self.decimals0))
-            amount_lim_scaled = int(amount_lim * (10**self.decimals1))
             tokenIn = self.address_token0
             tokenOut = self.address_token1
         else:
-            amount_scaled = int(amount * (10**self.decimals1))
-            amount_lim_scaled = int(amount_lim * (10**self.decimals0))
             tokenIn = self.address_token1
             tokenOut = self.address_token0
+        if (token == 0 and by == 'I') or (token == 1 and by == 'Q'):
+            amount_scaled = int(amount * (10**self.decimals1))
+            amount_lim_scaled = int(amount_lim * (10**self.decimals0))
+        elif (token == 0 and by == 'Q') or (token == 1 and by == 'I'):
+            amount_scaled = int(amount * (10**self.decimals0))
+            amount_lim_scaled = int(amount_lim * (10**self.decimals1))
         nonce, gas_price = self.pre_transaction()
         if by == 'I':
             params = {
@@ -284,7 +294,7 @@ class ChainLink:
             "amountOutMinimum": amount_lim_scaled,
             "sqrtPriceLimitX96": 0,
             }
-            transaction = self.abi_router.functions.exactInputSingle(params).build_transaction({
+            transaction = self.contract_router.functions.exactInputSingle(params).build_transaction({
             'gas': 300000,
             'gasPrice': int(gas_price * 1.05),
             'nonce': nonce,
@@ -301,7 +311,7 @@ class ChainLink:
             "amountInMaximum": amount_lim_scaled,
             "sqrtPriceLimitX96": 0,
             }
-            transaction = self.abi_router.functions.exactOutputSingle(params).build_transaction({
+            transaction = self.contract_router.functions.exactOutputSingle(params).build_transaction({
             'gas': 300000,
             'gasPrice': int(gas_price * 1.05),
             'nonce': nonce,
@@ -455,10 +465,9 @@ class ChainLink:
 
 # ===================================================================================== Operations with bot, simulation
 class BotPos:
-    def __init__(self, last_pos, sim, inst_main):        # chain argument
+    def __init__(self, descriptor, sim, inst_main):        # chain argument
         self.chain = inst_main
         self.sim = sim
-        self.id = last_pos
         params = BotPos.load_config()           # MUST DO REWRITEBLE WITH RUNING
         for key, value in params.items():
             setattr(self, key, value)
@@ -471,9 +480,9 @@ class BotPos:
         # else can be done later
         self.slippage = 0.02
         # Is it needed? Calc with prices, ticks in level down
-        self.range_width_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_act + 0.5 * self.range_width_init) - self.chain.tick_from_price(self.P_act - 0.5 * self.range_width_init))
-        self.range_width_max_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_act + 0.5 * self.range_width_max) - self.chain.tick_from_price(self.P_act - 0.5 * self.range_width_max))
-        self.range_width_min_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_act + 0.5 * self.range_width_min) - self.chain.tick_from_price(self.P_act - 0.5 * self.range_width_min))
+        # self.range_width_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_act + 0.5 * self.range_width_init) - self.chain.tick_from_price(self.P_act - 0.5 * self.range_width_init))
+        # self.range_width_max_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_act + 0.5 * self.range_width_max) - self.chain.tick_from_price(self.P_act - 0.5 * self.range_width_max))
+        # self.range_width_min_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_act + 0.5 * self.range_width_min) - self.chain.tick_from_price(self.P_act - 0.5 * self.range_width_min))
 
         self.prices_max = []
         self.prices_min = []
@@ -481,6 +490,57 @@ class BotPos:
         self.balances = []
         self.balances_alt = []
         self.times = []
+
+        engine = create_engine("sqlite:///data/positions.db")
+        Base = declarative_base()
+        Session = sessionmaker(bind=engine)
+        class Position(Base):
+            __tablename__ = "positions"
+            id = Column(Integer, primary_key=True)
+            descriptor = Column(Integer)
+            position = Column(Integer)
+            range_MIN = Column(Float)
+            range_MAX = Column(Float)
+            timestamp_IN = Column(DateTime)
+            timestamp_OUT = Column(DateTime)
+            token0_IN = Column(Float)
+            token1_IN = Column(Float)
+            token0_OUT = Column(Float)
+            token1_OUT = Column(Float)
+            token0_fee = Column(Float)
+            token1_fee = Column(Float)
+            token0_swap = Column(Float)
+            token1_swap = Column(Float)
+        # Base.metadata.create_all(engine)        # Once!
+        session = Session()
+
+        # pos1 = Position(token0_IN = 1000, token1_IN = 0.4, position = random.randint(100000, 999999), timestamp_IN = datetime.now())
+        # session.add(pos1)
+        # session.commit()
+
+        # print('-'*20)
+        # positions = session.query(Position).all()
+        # for p in positions:
+        #     print(p.id, p.token0_IN, p.token1_IN, p.position, p.timestamp_IN, p.timestamp_OUT)
+
+
+        last_pos = (
+            session.query(Position)
+            .filter(Position.descriptor == descriptor)            # условие
+            .order_by(Position.id.desc())                # сортировка по id убыв.
+            .first()                                     # берём первую (т.е. последнюю по id)
+        )
+        if last_pos.timestamp_OUT:
+            self.opened = 0
+        else:
+            self.opened = 1
+
+        # last_pos.token0_IN = 1111
+        # session.commit()
+
+        # session.delete(last_pos)
+        # session.commit()
+
 
     def proc_shift(self, mode):
         # new range.                                                            # need to price upd, after close
@@ -496,13 +556,18 @@ class BotPos:
         elif mode == 'DF':
             self.P_min = self.P_act - self.range_width * self.range_move_float
             self.P_max = self.P_act + self.range_width * (1 - self.range_move_float)
+        print('New range:', self.P_min, self.P_max, 'Width:', self.range_width)
 
     def proc_swap(self, mode):
         # do swap.
         if mode == 'UT' or mode == 'UF':                                        # need to check amm1
             self.k0 = BotPos.clc_amm(self.P_min, self.P_max, self.P_act, 1, 0)
             self.amm0_get = (self.k0 * self.amm1) / (1 + self.k0 * self.P_act)
+            print("Needed to get per one token:", self.k0)
+            print('Limit:', self.amm0_get * self.P_act * (1 + self.slippage))
+            print('Need to output token:', self.amm0_get)
             self.chain.get_swap_ammount_router(self.amm0_get, self.amm0_get * self.P_act * (1 + self.slippage), 0, by='Q')
+
             # self.amm1 -= self.amm0_get * self.P_act
             # self.amm0 += self.amm0_get
             # am0new = k * am1 / (1 + k * p)                swap!
@@ -538,7 +603,7 @@ class BotPos:
         # entry po position. Get position liquidity
         self.chain.approve_token(self.amm0, 0, 'm', wait=1)
         self.chain.approve_token(self.amm1, 1, 'm', wait=1)
-        self.status, self.id = self.chain.liq_add(self.P_min_tick, self.P_max_tick, self.amm0, self.amm1, wait=1)
+        self.status, self.id = self.chain.liq_add(self.P_min_tick, self.P_max_tick, self.amm0 * 0.99, self.amm1 * 0.99, wait=1)
         self.opened = 1
         # self.amm0 -= self.amm0_lock
         # self.amm1 -= self.amm1_lock
@@ -557,7 +622,7 @@ class BotPos:
         #     self.amm0_lock = self.L * (math.sqrt(self.P_max) - math.sqrt(self.P_min)) / (math.sqrt(self.P_max) * math.sqrt(self.P_min))
         #     self.amm1_lock = 0
         # calc statuses
-        # self.opened = 0
+        self.opened = 0
         # self.L = 0
         # self.amm0 += self.amm0_lock
         # self.amm1 += self.amm1_lock
