@@ -317,7 +317,16 @@ class ChainLink:
             'nonce': nonce,
             'chainId': self.chain_id,
             })
-        return self.post_transaction(transaction, wait)
+        status, receipt = self.post_transaction(transaction, wait)
+        if status == 1:
+            events = self.contract_router.events.Swap().process_receipt(receipt)
+            for e in events:
+                amm0 = e["args"]["amount0"]
+                amm1 = e["args"]["amount1"]
+        else:
+            amm0 = 0
+            amm1 = 0
+        return status, amm0, amm1
 
     def liq_add(self, range_min, range_max, amount0, amount1, deadline=60, wait=1):
         amount0_scaled = int(amount0 * (10**self.decimals0))
@@ -359,11 +368,16 @@ class ChainLink:
         })
         status, receipt = self.post_transaction(transaction, wait)
         if status == 1:
-            logs = self.contract_manager.events.Transfer().process_receipt(receipt)
-            token_id = logs[0]['args']['tokenId']
+            events = self.contract_manager.events.IncreaseLiquidity().process_receipt(receipt)
+            for e in events:
+                token_id = e["args"]["tokenId"]
+                amm0 = e["args"]["amount0"]
+                amm1 = e["args"]["amount1"]
         else:
             token_id = 0
-        return status, token_id
+            amm0 = 0
+            amm1 = 0
+        return status, amm0, amm1, token_id
     
     def liq_remove(self, token_id, deadline=60, wait=1):
         position = self.contract_manager.functions.positions(token_id).call()
@@ -383,7 +397,16 @@ class ChainLink:
         "nonce": nonce,
         "chainId": self.chain_id,
         })
-        return self.post_transaction(transaction, wait)
+        status, receipt = self.post_transaction(transaction, wait)
+        if status == 1:
+            events = self.contract_manager.events.DecreaseLiquidity().process_receipt(receipt)
+            for e in events:
+                amm0 = e["args"]["amount0"]
+                amm1 = e["args"]["amount1"]
+        else:
+            amm0 = 0
+            amm1 = 0
+        return status, amm0, amm1
 
     def collect(self, token_id, wait=1):
         nonce, gas_price = self.pre_transaction()
@@ -402,10 +425,14 @@ class ChainLink:
         })
         status, receipt = self.post_transaction(transaction, wait)
         if status == 1:
-            logs = self.contract_manager.events.Collect().process_receipt(receipt)
-            for log in logs:
-                print("Collected:", log.args.amount0, log.args.amount1)
-        return status, receipt
+            events = self.contract_manager.events.Collect().process_receipt(receipt)
+            for e in events:
+                amm0 = e["args"]["amount0"]
+                amm1 = e["args"]["amount1"]
+        else:
+            amm0 = 0
+            amm1 = 0
+        return status, amm0, amm1
 
     def burn(self, token_id, wait=1):
         nonce, gas_price = self.pre_transaction()
@@ -448,99 +475,59 @@ class ChainLink:
             return -1, 0
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+Base = declarative_base()
+class Position(Base):
+    __tablename__ = "positions"
+    id = Column(Integer, primary_key=True)
+    descriptor = Column(Integer)
+    position = Column(Integer)
+    range_MIN = Column(Float)
+    range_MAX = Column(Float)
+    timestamp_IN = Column(DateTime)
+    timestamp_OUT = Column(DateTime)
+    token0_IN = Column(Float)
+    token1_IN = Column(Float)
+    token0_OUT = Column(Float)
+    token1_OUT = Column(Float)
+    token0_fee = Column(Float)
+    token1_fee = Column(Float)
+    token0_swap = Column(Float)
+    token1_swap = Column(Float)
+    balance_0 = Column(Float)
+    balance_1 = Column(Float)
+    native = Column(Float)
+    step = Column(Integer)
 
 
 # ===================================================================================== Operations with bot, simulation
 class BotPos:
-    def __init__(self, descriptor, sim, inst_main):        # chain argument
+    def __init__(self, descriptor, sim, inst_main):
         self.chain = inst_main
         self.sim = sim
-        params = BotPos.load_config()           # MUST DO REWRITEBLE WITH RUNING
+        self.descriptor = descriptor
+        params = BotPos.load_config()
         for key, value in params.items():
             setattr(self, key, value)
-        # if not sim
+        self.native = self.chain.get_balance_native()
         self.amm0 = self.chain.get_balance_token(0)
         self.amm1 = self.chain.get_balance_token(1)
         self.P_act_tick, self.P_act = self.chain.get_current_tick()
-        #
         self.range_width = self.range_width_init
-        # else can be done later
         self.slippage = 0.02
-        # Is it needed? Calc with prices, ticks in level down
         # self.range_width_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_act + 0.5 * self.range_width_init) - self.chain.tick_from_price(self.P_act - 0.5 * self.range_width_init))
         # self.range_width_max_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_act + 0.5 * self.range_width_max) - self.chain.tick_from_price(self.P_act - 0.5 * self.range_width_max))
         # self.range_width_min_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_act + 0.5 * self.range_width_min) - self.chain.tick_from_price(self.P_act - 0.5 * self.range_width_min))
-
-        self.prices_max = []
-        self.prices_min = []
-        self.prices = []
-        self.balances = []
-        self.balances_alt = []
-        self.times = []
-
         engine = create_engine("sqlite:///data/positions.db")
-        Base = declarative_base()
+        Base.metadata.create_all(engine)
         Session = sessionmaker(bind=engine)
-        class Position(Base):
-            __tablename__ = "positions"
-            id = Column(Integer, primary_key=True)
-            descriptor = Column(Integer)
-            position = Column(Integer)
-            range_MIN = Column(Float)
-            range_MAX = Column(Float)
-            timestamp_IN = Column(DateTime)
-            timestamp_OUT = Column(DateTime)
-            token0_IN = Column(Float)
-            token1_IN = Column(Float)
-            token0_OUT = Column(Float)
-            token1_OUT = Column(Float)
-            token0_fee = Column(Float)
-            token1_fee = Column(Float)
-            token0_swap = Column(Float)
-            token1_swap = Column(Float)
-        # Base.metadata.create_all(engine)        # Once!
-        session = Session()
-
-        # pos1 = Position(token0_IN = 1000, token1_IN = 0.4, position = random.randint(100000, 999999), timestamp_IN = datetime.now())
-        # session.add(pos1)
-        # session.commit()
-
-        # print('-'*20)
-        # positions = session.query(Position).all()
-        # for p in positions:
-        #     print(p.id, p.token0_IN, p.token1_IN, p.position, p.timestamp_IN, p.timestamp_OUT)
-
-
-        last_pos = (
-            session.query(Position)
-            .filter(Position.descriptor == descriptor)            # условие
-            .order_by(Position.id.desc())                # сортировка по id убыв.
-            .first()                                     # берём первую (т.е. последнюю по id)
+        self.session = Session()
+        self.pos_data = (
+            self.session.query(Position)
+            .filter(Position.descriptor == self.descriptor)
+            .order_by(Position.id.desc())
+            .first()
         )
-        if last_pos.timestamp_OUT:
-            self.opened = 0
-        else:
-            self.opened = 1
-
-        # last_pos.token0_IN = 1111
-        # session.commit()
-
-        # session.delete(last_pos)
-        # session.commit()
-
+        self.step = self.pos_data.step
 
     def proc_shift(self, mode):
         # new range.                                                            # need to price upd, after close
@@ -558,28 +545,52 @@ class BotPos:
             self.P_max = self.P_act + self.range_width * (1 - self.range_move_float)
         print('New range:', self.P_min, self.P_max, 'Width:', self.range_width)
 
+
+# ===================================================================================== Swap calc needed to rebuild 
     def proc_swap(self, mode):
-        # do swap.
+
+        # calc amm1_teo_full
+        # calc k
+        # calc amm0_get_full
+        # calc amm0_get
+        # if positive, swap to 0 by Q
+        # else, negate and swap to 1 by I
+
         if mode == 'UT' or mode == 'UF':                                        # need to check amm1
             self.k0 = BotPos.clc_amm(self.P_min, self.P_max, self.P_act, 1, 0)
             self.amm0_get = (self.k0 * self.amm1) / (1 + self.k0 * self.P_act)
             print("Needed to get per one token:", self.k0)
             print('Limit:', self.amm0_get * self.P_act * (1 + self.slippage))
             print('Need to output token:', self.amm0_get)
-            self.chain.get_swap_ammount_router(self.amm0_get, self.amm0_get * self.P_act * (1 + self.slippage), 0, by='Q')
-
+            x, x0, x1 = self.chain.get_swap_ammount_router(self.amm0_get, self.amm0_get * self.P_act * (1 + self.slippage), 0, by='Q')
             # self.amm1 -= self.amm0_get * self.P_act
             # self.amm0 += self.amm0_get
             # am0new = k * am1 / (1 + k * p)                swap!
+
+        
+
+        # calc amm0_teo_full
+        # calc k1
+        # calc amm1_get_full
+        # calc amm1_get
+        # if positive, swap to 1 by Q
+        # else, negate and swap to 0 by I
+
         elif mode == 'DT' or mode == 'DF':                                      # need to check amm0
             self.k1 = BotPos.clc_amm(self.P_min, self.P_max, self.P_act, 1, 1)
             self.amm1_get = (self.k1 * self.amm0 * self.P_act) / (self.k1 + self.P_act)
-            self.chain.get_swap_ammount_router(self.amm1_get, self.amm1_get / self.P_act * (1 - self.slippage), 1, by='Q')
+            x, x0, x1 = self.chain.get_swap_ammount_router(self.amm1_get, self.amm1_get / self.P_act * (1 - self.slippage), 1, by='Q')
             # self.amm0 -= self.amm1_get / self.P_act
             # self.amm1 += self.amm1_get  
             # am1new = (k * am0 * p) / (k + p)              swap!
-        self.amm0 = self.chain.get_balance_token(0)
+        if x == 1:
+            self.step = 1
+            self.pos_data = Position(descriptor = self.descriptor, token0_swap = x0, token1_swap = x1, step = self.step)
+            self.session.add(self.pos_data)
+            self.session.commit()
+        self.amm0 = self.chain.get_balance_token(0)             # refresh variables !!
         self.amm1 = self.chain.get_balance_token(1)
+        return x
 
     def proc_open(self, mode):
         if mode == 'UT' or mode == 'UF':
@@ -594,35 +605,71 @@ class BotPos:
             self.P_max_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_max), direction='s')
             self.bruto_min = BotPos.clc_rng(self.chain.price_from_tick(self.P_max_tick), self.chain.price_from_tick(self.P_act_tick), self.amm0, self.amm1)
             self.P_min_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.bruto_min), direction='s')
-            # self.bruto_min = BotPos.clc_rng(self.P_max, self.P_act, self.amm0, self.amm1)
-            # self.P_min_tick = BotPos.prc_norm(self.bruto_min, 1, 1, 'l')
             # self.amm0_lock = self.amm0
             # self.amm1_lock = BotPos.clc_amm(self.P_min, self.P_max, self.P_act, self.amm0_lock, 1)
             # self.L = self.amm1_lock / (math.sqrt(self.P_act) - math.sqrt(self.P_min))
             # self.L2 = self.amm0_lock / ((math.sqrt(self.P_max) - math.sqrt(self.P_act)) / (math.sqrt(self.P_max) * math.sqrt(self.P_act)))
-        # entry po position. Get position liquidity
         self.chain.approve_token(self.amm0, 0, 'm', wait=1)
         self.chain.approve_token(self.amm1, 1, 'm', wait=1)
-        self.status, self.id = self.chain.liq_add(self.P_min_tick, self.P_max_tick, self.amm0 * 0.99, self.amm1 * 0.99, wait=1)
-        self.opened = 1
+        x, x0, x1, self.id = self.chain.liq_add(self.P_min_tick, self.P_max_tick, self.amm0, self.amm1, wait=1)
+        if x == 1:
+            self.step = 2
+            self.pos_data.timestamp_IN = datetime.now()
+            self.pos_data.token0_IN = x0
+            self.pos_data.token1_IN = x1
+            self.pos_data.position = self.id
+            self.pos_data.range_MIN = self.P_min_tick
+            self.pos_data.range_MAX = self.P_max_tick
+            self.pos_data.step = self.step
+            self.session.commit()
         # self.amm0 -= self.amm0_lock
         # self.amm1 -= self.amm1_lock
         # self.P_max = 1.0001 ** self.P_max_tick
         # self.P_min = 1.0001 ** self.P_min_tick
+        return x
 
-    def proc_close(self, mode):
-        self.chain.liq_remove(self.id)
-        self.chain.collect(self.id)
-        self.chain.burn(self.id)
-        # exit position. Return position liquidity
+    def proc_close(self):
+        if self.step == 2:
+            x, x0, x1 = self.chain.liq_remove(self.id)
+            if x == 1:
+                self.step = 3
+                self.pos_data.token0_OUT = x0
+                self.pos_data.token1_OUT = x1
+                self.pos_data.step = self.step
+                self.session.commit()
+            else:
+                return x
+        if self.step == 3:
+            x, x0, x1 = self.chain.collect(self.id)
+            if x == 1:
+                self.step = 4
+                self.pos_data.timestamp_OUT = datetime.now()
+                self.pos_data.token0_fee = x0
+                self.pos_data.token1_fee = x1
+                self.pos_data.step = self.step
+                self.session.commit()
+            else:
+                return x
+        if self.step == 4:
+            x, _ = self.chain.burn(self.id)
+            self.amm0 = self.chain.get_balance_token(0)
+            self.amm1 = self.chain.get_balance_token(1)
+            self.native = self.chain.get_balance_native()
+            if x == 1:
+                self.step = 5
+                self.pos_data.balance_0 = self.amm0
+                self.pos_data.balance_1 = self.amm1
+                self.pos_data.native = self.native
+                self.pos_data.step = self.step
+                self.session.commit()
+            return x
+        return 0
         # if mode == 'UT' or mode == 'UF':
         #     self.amm0_lock = 0
         #     self.amm1_lock = self.L * (math.sqrt(self.P_max) - math.sqrt(self.P_min))
         # elif mode == 'DT' or mode == 'DF':
         #     self.amm0_lock = self.L * (math.sqrt(self.P_max) - math.sqrt(self.P_min)) / (math.sqrt(self.P_max) * math.sqrt(self.P_min))
         #     self.amm1_lock = 0
-        # calc statuses
-        self.opened = 0
         # self.L = 0
         # self.amm0 += self.amm0_lock
         # self.amm1 += self.amm1_lock
@@ -630,7 +677,6 @@ class BotPos:
         # self.amm1_lock = 0
 
     def proc_modify(self, mode):
-        # new range width
         if mode == 'UT' or mode == 'DT':
             self.range_width *= self.range_scale_trend
         elif mode == 'UF' or mode == 'DF':
@@ -639,76 +685,22 @@ class BotPos:
             self.range_width = self.range_width_max
         if self.range_width_tick < self.range_width_min:
             self.range_width = self.range_width_min
-    
-    def proc_cycle(self, mode):             # here can be balance and price actuators
-        self.proc_close(mode)
-        self.proc_modify(mode)
-        self.proc_shift(mode)
-        self.proc_swap(mode)
-        self.proc_open(mode)
 
-    def p_actuate(self, mode, hlp = 0):
-        if mode == 'rnd':                                   # Random price change
-            if (1.0001 ** self.P_act - self.reference_price) / self.reference_price * 100 > 100:
-                x = -0.001
-            elif (1.0001 ** self.P_act - self.reference_price) / self.reference_price * 100 < -50:
-                x = 0.001
-            else:
-                x = 0                                   # hold movement in reality
-            if hlp:                                     # hour or tick randomize
-                y = 0.0001
-            else:
-                y = 0.005
-            self.P_act_normal *= (1 + random.gauss(x, y))
-            self.P_act = self.prc_norm(self.P_act_normal)
-        elif mode == 'man':
-            if hlp:
-                self.P_act = self.P_max_tick
-                self.P_act_normal = 1.0001 ** self.P_max_tick
-            else:
-                self.P_act = self.P_min_tick
-                self.P_act_normal = 1.0001 ** self.P_min_tick
-        else:
-            self.amm0 = self.chain.get_balance_token(0)
-            self.amm1 = self.chain.get_balance_token(1)
-            self.P_act_tick, self.P_act = self.chain.get_current_tick()
-
-    def stat_put(self, time):
-        self.prices_max.append(self.P_max)
-        self.prices_min.append(self.P_min)
-        self.prices.append(self.P_act_normal)
-        self.balances.append((self.amm1 + self.amm0 * self.P_act_normal) + (self.amm1_lock + self.amm0_lock * self.P_act_normal))
-        self.balances_alt.append((self.amm0 + self.amm1 / self.P_act_normal) + (self.amm0_lock + self.amm1_lock / self.P_act_normal))
-        self.times.append(float(time))
-
-    @staticmethod
-    def prc_norm(P, x10 = 0, t = 1, lvl = ''):
-        tick = math.log(P) / math.log(1.0001)
-        if x10:
-            tick = tick / 10
-        if lvl == 'l':
-            tick = math.floor(tick)
-        elif lvl == 'h':
-            tick = math.ceil(tick)
-        else:
-            tick = round(tick)
-        if x10:
-            tick = tick * 10
-        if t:
-            return tick
-        else:
-            return 1.0001 ** tick
+    def p_actuate(self):
+        self.amm0 = self.chain.get_balance_token(0)
+        self.amm1 = self.chain.get_balance_token(1)
+        self.native = self.chain.get_balance_native()
+        self.P_act_tick, self.P_act = self.chain.get_current_tick()
     
     @staticmethod
     def clc_amm(P_min, P_max, P, ammount_in, target):
         if target:
             L = ammount_in / ((math.sqrt(P_max) - math.sqrt(P)) / (math.sqrt(P_max) * math.sqrt(P)))
             ammount_out = L * (math.sqrt(P) - math.sqrt(P_min))
-            return ammount_out
         else:
             L = ammount_in / (math.sqrt(P) - math.sqrt(P_min))
             ammount_out = L * (math.sqrt(P_max) - math.sqrt(P)) / (math.sqrt(P_max) * math.sqrt(P))
-            return ammount_out
+        return ammount_out
     
     @staticmethod
     def clc_rng(P_border, P, ammount_0, ammount_1):
