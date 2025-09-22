@@ -1,5 +1,5 @@
 # version 0.0.1
-from botcore import BotPos, ChainLink
+from package import BotPos, ChainLink
 import matplotlib.pyplot as plt
 from datetime import datetime
 import time

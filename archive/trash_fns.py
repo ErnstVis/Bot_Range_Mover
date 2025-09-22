@@ -38,3 +38,41 @@
 #     self.balances.append((self.amm1 + self.amm0 * self.P_act_normal) + (self.amm1_lock + self.amm0_lock * self.P_act_normal))
 #     self.balances_alt.append((self.amm0 + self.amm1 / self.P_act_normal) + (self.amm0_lock + self.amm1_lock / self.P_act_normal))
 #     self.times.append(float(time))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        # if mode == 'UT' or mode == 'UF':
+        #     self.k0 = BotPos.clc_amm(self.P_min, self.P_max, self.P_act, 1, 0)
+        #     self.amm0_get = (self.k0 * self.amm1) / (1 + self.k0 * self.P_act)
+        #     print("Needed to get per one token:", self.k0)
+        #     print('Limit:', self.amm0_get * self.P_act * (1 + self.slippage))
+        #     print('Need to output token:', self.amm0_get)
+        #     x, x0, x1 = self.chain.get_swap_ammount_router(self.amm0_get, self.amm0_get * self.P_act * (1 + self.slippage), 0, by='Q')
+        #     # self.amm1 -= self.amm0_get * self.P_act
+        #     # self.amm0 += self.amm0_get
+        #     # am0new = k * am1 / (1 + k * p)                            FORMULA
+        # elif mode == 'DT' or mode == 'DF':
+        #     self.k1 = BotPos.clc_amm(self.P_min, self.P_max, self.P_act, 1, 1)
+        #     self.amm1_get = (self.k1 * self.amm0 * self.P_act) / (self.k1 + self.P_act)
+        #     x, x0, x1 = self.chain.get_swap_ammount_router(self.amm1_get, self.amm1_get / self.P_act * (1 - self.slippage), 1, by='Q')
+        #     # self.amm0 -= self.amm1_get / self.P_act
+        #     # self.amm1 += self.amm1_get  
+        #     # am1new = (k * am0 * p) / (k + p)                          FORMULA
