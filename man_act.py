@@ -1,10 +1,60 @@
 from package import BotPos, ChainLink
+import math
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="eth_utils")
 
 
 chain = ChainLink('arbitrum', 'weth', 'usdc', 'uniswap', 'test', 500)
 pos = BotPos(1, 0, chain)
+
+# j = -191800 + 360
+# for i in range(11):
+#     print(pos.chain.price_from_tick(j))
+#     j -= 360
+
+
+# pos.chain.approve_token(0, 0, 'r', wait=1)
+# pos.chain.approve_token(0, 1, 'r', wait=1)
+# pos.chain.approve_token(0, 0, 'm', wait=1)
+# pos.chain.approve_token(0, 1, 'm', wait=1)
+
+
+
+
+# position = pos.chain.contract_manager.functions.positions(pos.id).call()
+
+# nonce         = position[0]
+# operator      = position[1]
+# token0        = position[2] 
+# token1        = position[3]
+# fee           = position[4]
+# tick_lower    = position[5]
+# tick_upper    = position[6]
+# liquidity     = position[7]
+# feeGrowth0    = position[8]
+# feeGrowth1    = position[9]
+# tokensOwed0   = position[10]
+# tokensOwed1   = position[11]
+
+# print("Liquidity:", liquidity)
+# print("Range:", tick_lower, tick_upper)
+
+
+# P_min = pos.chain.price_from_tick(tick_lower)
+# P_max =  pos.chain.price_from_tick(tick_upper)
+# print("Price range:", P_min, P_max, pos.chain.price_from_tick(-192160))
+# ammount0_teo = liquidity * (math.sqrt(P_max) - math.sqrt(P_min)) / (math.sqrt(P_max) * math.sqrt(P_min))
+# ammount1_teo = liquidity * (math.sqrt(P_max) - math.sqrt(P_min))
+# print(pos.chain.decimals0, pos.chain.decimals1)
+# print("Theoretical ammounts:", ammount0_teo / 10**(pos.chain.decimals0 - pos.chain.decimals1), ammount1_teo / 10**(pos.chain.decimals0 - pos.chain.decimals1))
+# print("Theoretical ammounts eth in mid usd course:", (ammount0_teo/10**(pos.chain.decimals0 - pos.chain.decimals1)) * ((P_min + P_max)/2))
+
+
+
+
+
+
+
 
 # pos.step = 2
 # pos.id = 4921445

@@ -1,10 +1,10 @@
 {
-    "range_scale_trend": 0.95,
-    "range_move_trend": 0.35,
-    "range_scale_float": 1.15,
-    "range_move_float": 0.25,
-    "range_width_max": 1000,
-    "range_width_min": 50,
-    "range_width_init": 150,
-    "reference_price": 2000
+    "range_scale_stable": 0.8,
+    "range_scale_fluctuate": 1.25,
+    "range_move_trend": 0.4,
+    "range_move_float": 0.2,
+    "range_width_max": 1397,
+    "range_width_min": 96,
+    "range_width_init": 187.5,
+    "reference_price": 4000
 }
