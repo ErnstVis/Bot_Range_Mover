@@ -42,7 +42,7 @@ while True:
             pos.prev_mode = pos.mode
             pos.mode = 'D'
             continue
-        if pos.pos_data.timestamp_IN and datetime.now() - pos.pos_data.timestamp_IN > timedelta(hours=24):
+        elif pos.pos_data.timestamp_IN and datetime.now() - pos.pos_data.timestamp_IN > timedelta(hours=pos.dyn_period_scale()) and pos.test_min_width():
             if pos.proc_close() != 1:
                 print('\nSTATUS NOT 1...')
                 time.sleep(300)

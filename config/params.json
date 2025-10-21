@@ -6,5 +6,7 @@
     "range_width_max": 1397,
     "range_width_min": 96,
     "range_width_init": 187.5,
-    "reference_price": 4000
+    "reference_price": 4000,
+    "dyn_period_max": 36,
+    "dyn_period_min": 12
 }

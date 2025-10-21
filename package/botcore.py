@@ -587,6 +587,7 @@ class Position(Base):
     balance_0 = Column(Float)
     balance_1 = Column(Float)
     native = Column(Float)
+    price = Column(Float)
     step = Column(Integer)
 
 
@@ -658,7 +659,7 @@ class BotPos:
     def proc_swap(self):
         print('Current price:', self.P_act, 'Range:', self.P_min, self.P_max)
         print('Balances:', self.amm0, self.amm1)
-        if self.mode == 'U' or self.mode == 'D':                                                # mode == 'UT' or mode == 'UF':
+        if self.mode == 'U' or self.mode == 'D' or self.mode == 'T':                                                # mode == 'UT' or mode == 'UF':
             self.amm1_teo_full = self.amm1 + self.amm0 * self.P_act
             self.k0 = BotPos.clc_amm(self.P_min, self.P_max, self.P_act, 1, 0)
             self.amm0_get_full = (self.k0 * self.amm1_teo_full) / (1 + self.k0 * self.P_act)
@@ -739,6 +740,12 @@ class BotPos:
             # self.amm1_lock = BotPos.clc_amm(self.P_min, self.P_max, self.P_act, self.amm0_lock, 1)
             # self.L = self.amm1_lock / (math.sqrt(self.P_act) - math.sqrt(self.P_min))
             # self.L2 = self.amm0_lock / ((math.sqrt(self.P_max) - math.sqrt(self.P_act)) / (math.sqrt(self.P_max) * math.sqrt(self.P_act)))
+        else:
+            print('Act:', self.P_act_tick, self.chain.price_from_tick(self.P_act_tick))
+            self.P_min_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_min), direction='s')
+            print('Min:', self.P_min, self.P_min_tick, self.chain.price_from_tick(self.P_min_tick))
+            self.P_max_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_max), direction='s')
+            print('Max:', self.P_max, self.P_max_tick, self.chain.price_from_tick(self.P_max_tick))
         #==========================================================Approve dont needed==========================
         # self.chain.approve_token(self.amm0, 0, 'm', wait=1)
         # self.chain.approve_token(self.amm1, 1, 'm', wait=1)
@@ -772,6 +779,7 @@ class BotPos:
                 self.step = 3
                 self.pos_data.token0_OUT = x0
                 self.pos_data.token1_OUT = x1
+                self.pos_data.price = self.P_act
                 self.pos_data.step = self.step
                 self.session.commit()
             return x
@@ -830,7 +838,19 @@ class BotPos:
         if show:
             print('Refresh price =================')
         self.P_act_tick, self.P_act = self.chain.get_current_tick(show)
+
+    def dyn_period_scale(self):
+        var_times = self.dyn_period_max - self.dyn_period_min
+        var_width = self.range_width_max - self.range_width_min
+        var_ratio = var_width / var_times
+        var_aux = (self.range_width - self.range_width_min) / var_ratio
+        return self.dyn_period_max - var_aux
     
+    def test_min_width(self):
+        return self.range_width * ((self.range_scale_stable + 1) / 2) > self.range_width_min
+
+
+
     @staticmethod
     def clc_amm(P_min, P_max, P, ammount_in, target):
         if target:

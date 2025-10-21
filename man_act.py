@@ -1,11 +1,33 @@
 from package import BotPos, ChainLink
 import math
+import time
+from datetime import datetime, timedelta
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="eth_utils")
 
 
 chain = ChainLink('arbitrum', 'weth', 'usdc', 'uniswap', 'test', 500)
 pos = BotPos(1, 0, chain)
+
+pos.range_width = 180
+print(pos.test_min_width())
+pos.range_width = 100
+print(pos.test_min_width())
+print(pos.dyn_period_scale())
+pos.range_width = 800
+print(pos.dyn_period_scale())
+pos.range_width = 1250
+print(pos.dyn_period_scale())
+
+a = datetime.now()
+time.sleep(2)
+b = datetime.now()
+c = b - a
+print(c)
+d = timedelta(seconds=2)
+print(d)
+print(c > d)
+
 
 # j = -191800 + 360
 # for i in range(11):
