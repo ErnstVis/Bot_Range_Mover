@@ -9,24 +9,64 @@ warnings.filterwarnings("ignore", category=UserWarning, module="eth_utils")
 chain = ChainLink('arbitrum', 'weth', 'usdc', 'uniswap', 'test', 500)
 pos = BotPos(1, 0, chain)
 
-pos.range_width = 180
-print(pos.test_min_width())
-pos.range_width = 100
-print(pos.test_min_width())
-print(pos.dyn_period_scale())
-pos.range_width = 800
-print(pos.dyn_period_scale())
-pos.range_width = 1250
-print(pos.dyn_period_scale())
 
-a = datetime.now()
-time.sleep(2)
-b = datetime.now()
-c = b - a
-print(c)
-d = timedelta(seconds=2)
-print(d)
-print(c > d)
+
+# pos.range_width = 180
+# print(pos.test_min_width())
+# pos.range_width = 100
+# print(pos.test_min_width())
+# print(pos.dyn_period_scale())
+# pos.range_width = 800
+# print(pos.dyn_period_scale())
+# pos.range_width = 1250
+# print(pos.dyn_period_scale())
+
+# a = datetime.now()
+# time.sleep(2)
+# b = datetime.now()
+# c = b - a
+# print(c)
+# d = timedelta(seconds=2)
+# print(d)
+# print(c > d)
+
+
+
+
+
+
+
+
+
+
+p = 3752.0807
+mn = 3662.83
+mx = 3952.05
+
+
+w = mx - mn
+var_times = pos.dyn_period_max - pos.dyn_period_min
+var_width = pos.range_width_max - pos.range_width_min
+var_ratio = var_width / var_times
+var_aux = (w - pos.range_width_min) / var_ratio
+y = pos.dyn_period_max - var_aux
+print(y)
+
+
+z1 = int(50 * (p - mn) / (mx - mn))
+z2 = 50 - z1
+print(z1, z2)
+print('\t|', '.' * z1, '|', '.' * z2, '|', sep='')
+
+
+
+
+
+
+
+
+
+
 
 
 # j = -191800 + 360

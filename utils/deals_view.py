@@ -37,6 +37,7 @@ class Position(Base):
     balance_0 = Column(Float)
     balance_1 = Column(Float)
     native = Column(Float)
+    price = Column(Float)
     step = Column(Integer)
 
 engine = create_engine("sqlite:///data/positions.db")
@@ -46,61 +47,61 @@ session = Session()
 lasts = (
     session.query(Position)
     .filter(Position.descriptor == 1)
-    .filter(Position.id >= 16)
+    .filter(Position.id >= 9)
     .order_by(Position.id.desc())
     .limit(20)
     .all()
 )
-print(lasts[0].timestamp_IN, '\n', lasts[0].position,'\n', -lasts[0].token0_swap, -lasts[0].token1_swap, '\n')
+print(lasts[0].timestamp_IN)
+print('Position:', lasts[0].position)
+print('Swaped:', lasts[0].token0_swap, lasts[0].token1_swap)
+print('Tab id:', lasts[0].id, '\n')
 lasts = list(reversed(lasts))
 
 sum_total_0 = 0
 sum_total_1 = 0
 for row in lasts[:-1]:                                                                                  # Part with positions text description
-    avrg_p = (row.range_MIN + row.range_MAX) / 2
-    print('|Pos:', row.position, row.range_MIN, row.range_MAX, row.descriptor, row.id)
-    print('|IN:', -row.token0_IN, -row.token1_IN)
-    print('|OUT:', row.token0_OUT, row.token1_OUT)
-    if row.token0_OUT * avrg_p < row.token1_OUT:
-        alt_out0 = clc_amm(row.range_MIN, row.range_MAX, row.token1_OUT, 0)
-        alt_out1 = 0
-    else:
-        alt_out0 = 0
-        alt_out1 = clc_amm(row.range_MIN, row.range_MAX, row.token0_OUT, 1)
-    print('|ALT_OUT:', alt_out0, alt_out1)
-    print('|Fee:', row.token0_fee, row.token1_fee)
-    print('|Swap:', -row.token0_swap, -row.token1_swap)
-    avrg_p = (row.range_MIN + row.range_MAX) / 2
+    print('|', row.id, ':\t', round(row.range_MIN, 2), '\r\t\t\t', round(row.range_MAX, 2), end='\r\t\t\t\t\t\t')
+    print(round(row.price, 2))
+    print('|Swap:\t', round(-row.token1_swap, 2), '\r\t\t\t', round(-row.token0_swap, 6))
+    print('|IN:\t', round(-row.token1_IN, 2), '\r\t\t\t', round(-row.token0_IN, 6))
+    print('|OUT:\t', round(row.token1_OUT, 2), '\r\t\t\t', round(row.token0_OUT, 6))
+    print('|Fee:\t', round(row.token1_fee, 2), '\r\t\t\t', round(row.token0_fee, 6))
     sum_0 = -row.token0_IN + row.token0_OUT + row.token0_fee + -row.token0_swap
     sum_1 = -row.token1_IN + row.token1_OUT + row.token1_fee + -row.token1_swap
-    print('|Balance:', row.balance_0, row.balance_1, row.native * avrg_p)
+    print('|Balns:\t', round(row.balance_1, 2), '\r\t\t\t', round(row.balance_0, 6), end='\r\t\t\t\t\t\t')
+    print(round(row.balance_0 * row.price + row.balance_1, 2))
     sum_total_0 += sum_0
     sum_total_1 += sum_1
     course = -sum_1/sum_0
-    print('|Change:', sum_0, sum_1, course)
+    print('|Chng:\t', round(sum_1, 2), '\r\t\t\t', round(sum_0, 6), end='\r'+'\t'*6)
+    print(round(sum_0 * row.price + sum_1, 2))
+    print('|Koef:\t', round(course, 2), end='\r\t\t\t')
     if sum_0 < 0 and sum_1 > 0:
-        print('sell')
+        print('sell', end=' ')
         if course > row.range_MAX:
             print('good')
         elif course < row.range_MIN:
             print('bad')
         else:
             print('neutral')
-    elif sum_0 > 0 and sum_1 < 0:
-        print('buy')
+    elif sum_0 >= 0 and sum_1 <= 0:
+        print('buy', end=' ')
         if course < row.range_MIN:
             print('good')
         elif course > row.range_MAX:
             print('bad')
         else:
             print('neutral')
-    elif sum_0 < 0 and sum_1 < 0:
+    elif sum_0 <= 0 and sum_1 <= 0:
         print('loss')
     elif sum_0 > 0 and sum_1 > 0:
         print('profit')
-    print('-'*40)
+    print('|Gas:\t', round(row.native * row.price, 2))
+    print('-'*60)
 
-print('\nTotal:', sum_total_0, sum_total_1, -sum_total_1/sum_total_0)
+print('\nTotal changes without gas:', round(sum_total_1, 2), round(sum_total_0, 6), round(-sum_total_1/sum_total_0, 2), round(sum_total_1 + sum_total_0 * row.price, 2), sep='\t')
+print('='*80+'\n')
 
 
 # ================================================================================================================
@@ -112,21 +113,12 @@ prices_max = [pos.range_MAX for pos in lasts]
 prices_emit = []
 price_aux = None
 for pos in lasts:                                       # Range collection with times
-    if pos.range_MIN is None:
-        avrg_p = -pos.token1_swap/pos.token0_swap
-    else:
-        avrg_p = (pos.range_MIN + pos.range_MAX) / 2
-    if pos.timestamp_OUT is None:
-        prices_emit.append(price_aux)
-        continue
     if price_aux is None:
-        prices_emit.append(avrg_p)
+        prices_emit.append((pos.range_MIN + pos.range_MAX) / 2)    
     else:
         prices_emit.append(price_aux)
-    if pos.token0_OUT * avrg_p > pos.token1_OUT:
-        price_aux = pos.range_MIN
-    else:
-        price_aux = pos.range_MAX
+    if pos.price is not None:
+        price_aux = pos.price
 
 plt.figure(figsize=(18,12))
 plt.scatter(timestamps, prices_min, marker="o", color="black", s=60)
@@ -136,8 +128,8 @@ plt.title("Ranges")
 plt.grid(True)
 plt.xticks(rotation=30)
 plt.tight_layout()
-plt.savefig('pictures/ranges_by_time.png')
-
+plt.savefig('pictures/ranges.png')
+plt.close()
 
 # ================================================================================================================
 
@@ -192,20 +184,14 @@ for pos in lasts:                               # Collect native balance losses 
     if pos.timestamp_OUT is not None:                   # Tokens dif after cycle
         sum_0 = -pos.token0_IN + pos.token0_OUT + pos.token0_fee + -pos.token0_swap
         sum_1 = -pos.token1_IN + pos.token1_OUT + pos.token1_fee + -pos.token1_swap
-        if pos.token0_OUT * avrg_p > pos.token1_OUT:    # If output down or up
-            sum_total = sum_0 * pos.range_MIN + sum_1                           # Sum dif after cycle
-            sum_total_alt = sum_0 + sum_1 / pos.range_MIN
-            sum_fee = pos.token0_fee * pos.range_MIN + pos.token1_fee
-            sum_fee_alt = pos.token0_fee + pos.token1_fee / pos.range_MIN
-            sum_amm = pos.balance_0 * pos.range_MIN + pos.balance_1             # Sum ammounts in work
-            sum_amm_alt = pos.balance_0 + pos.balance_1 / pos.range_MIN
-        else:
-            sum_total = sum_0 * pos.range_MAX + sum_1   
-            sum_total_alt = sum_0 + sum_1 / pos.range_MAX
-            sum_fee = pos.token0_fee * pos.range_MAX + pos.token1_fee
-            sum_fee_alt = pos.token0_fee + pos.token1_fee / pos.range_MAX
-            sum_amm = pos.balance_0 * pos.range_MAX + pos.balance_1 
-            sum_amm_alt = pos.balance_0 + pos.balance_1 / pos.range_MAX
+
+        sum_total = sum_0 * pos.price + sum_1                           # Sum dif after cycle
+        sum_total_alt = sum_0 + sum_1 / pos.price
+        sum_fee = pos.token0_fee * pos.price + pos.token1_fee
+        sum_fee_alt = pos.token0_fee + pos.token1_fee / pos.price
+        sum_amm = pos.balance_0 * pos.price + pos.balance_1             # Sum ammounts in work
+        sum_amm_alt = pos.balance_0 + pos.balance_1 / pos.price
+
         proc_calc = sum_total / (sum_amm - sum_total) * 100                                   # Percent calculation for cycle
         proc_calc_alt = sum_total_alt / (sum_amm_alt - sum_total_alt) * 100
 
@@ -228,7 +214,10 @@ for pos in lasts:                               # Collect native balance losses 
             dur_cur = 1
         apr = proc_calc/dur_cur*365                                                 # Annual percent rate
         testpar = apr/(avrg_p/(pos.range_MAX - pos.range_MIN))                      # Test metric  
-        print(sum_total, sum_amm, proc_calc, apr, testpar, dur_cur)
+        print('Chng:', round(sum_total, 2), end=' ')
+        print('\tusd\t\tBal:', round(sum_amm, 2), end=' ')
+        print('\tusd\t\tChng:', round(proc_calc, 2), end=' ')
+        print('\t%\t\tAPR:', round(apr, 2), '\t%')
     else:
         sum_total = 0
         sum_total_alt = 0
@@ -286,7 +275,7 @@ plt.grid(True)
 plt.xticks([])
 plt.tight_layout()
 plt.savefig('pictures/profit.png')
-
+plt.close()
 
 
 

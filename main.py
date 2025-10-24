@@ -6,7 +6,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="eth_utils")
 
 
 
-chain = ChainLink('arbitrum', 'weth', 'usdc', 'uniswap', 'test', 500)
+chain = ChainLink('arbitrum', 'weth', 'usdc', 'uniswap', 'test')
 pos = BotPos(1, 0, chain)
 
 
@@ -25,7 +25,7 @@ while True:
             time.sleep(300)
             continue
     elif pos.step == 2:                     # Opened
-        pos.actuate_short(0)
+        pos.actuate_short()
         if pos.P_act > pos.P_max:
             if pos.proc_close() != 1:
                 print('\nSTATUS NOT 1...')
@@ -33,6 +33,9 @@ while True:
                 continue
             pos.prev_mode = pos.mode
             pos.mode = 'U'
+            pos.params["prev_mode"] = pos.prev_mode
+            pos.params["mode"] = pos.mode
+            pos.save_config(pos.params)
             continue
         elif pos.P_act < pos.P_min:
             if pos.proc_close() != 1:
@@ -41,6 +44,9 @@ while True:
                 continue
             pos.prev_mode = pos.mode
             pos.mode = 'D'
+            pos.params["prev_mode"] = pos.prev_mode
+            pos.params["mode"] = pos.mode
+            pos.save_config(pos.params)
             continue
         elif pos.pos_data.timestamp_IN and datetime.now() - pos.pos_data.timestamp_IN > timedelta(hours=pos.dyn_period_scale()) and pos.test_min_width():
             if pos.proc_close() != 1:
@@ -49,8 +55,11 @@ while True:
                 continue
             pos.prev_mode = pos.mode
             pos.mode = 'T'
+            pos.params["prev_mode"] = pos.prev_mode
+            pos.params["mode"] = pos.mode
+            pos.save_config(pos.params)
             continue
-        time.sleep(120)
+        time.sleep(60)
     elif pos.step == 3 or pos.step == 4:
         if pos.proc_close() != 1:
             print('\nSTATUS NOT 1...')
@@ -58,6 +67,8 @@ while True:
             continue
     elif pos.step == 5:
         pos.proc_modify()
+        pos.params["range_width"] = pos.range_width
+        pos.save_config(pos.params)
         pos.step = 0
 
 
