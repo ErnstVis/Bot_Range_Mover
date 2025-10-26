@@ -1,18 +1,17 @@
 # Bot_Range_Mover
-Tool for DeFi trade
+V0.2            code optimized, working, testing strategy
 
 
-    run and monitor position; 
-    shifts ranges and adjusts tires; 
-    record statistics of intermittent losses; 
+Tool for DeFi trade. Shift and modify positions. Analytics.
 
-
-
+Concept: dynamicly find optimal range
 
 
 
 
-need to create once (uncomment in code)
+
+
+
 data/positions.db
 
 private/secrest.env

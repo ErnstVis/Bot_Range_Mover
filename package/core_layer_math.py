@@ -218,7 +218,6 @@ class BotPos:
         if x == 1:
             self.amm0 = self.chain.get_balance_token(0)
             self.amm1 = self.chain.get_balance_token(1)
-            self.native = self.chain.get_balance_native()
             self.step = 2
             self.pos_data.timestamp_IN = datetime.now()
             print('=' * 10, 'To pool gone:', x0, x1)
@@ -228,7 +227,6 @@ class BotPos:
             self.pos_data.range_MIN = self.chain.price_from_tick(self.P_min_tick)
             self.pos_data.range_MAX = self.chain.price_from_tick(self.P_max_tick)
             self.pos_data.step = self.step
-            self.pos_data.native = self.native
             self.session.commit()
             # print teo min exit
             # print teo max exit
@@ -263,10 +261,12 @@ class BotPos:
             x = 1
             self.amm0 = self.chain.get_balance_token(0)
             self.amm1 = self.chain.get_balance_token(1)
+            self.native = self.chain.get_balance_native()
             if x == 1:
                 self.step = 5
                 self.pos_data.balance_0 = self.amm0
                 self.pos_data.balance_1 = self.amm1
+                self.pos_data.native = self.native
                 self.pos_data.step = self.step
                 self.session.commit()
             return x

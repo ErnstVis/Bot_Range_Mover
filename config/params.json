@@ -5,10 +5,10 @@
     "range_move_float": 0.2,
     "range_width_max": 1397,
     "range_width_min": 96,
-    "range_width": 234.38,
+    "range_width": 366.2,
     "dyn_period_max": 24,
     "dyn_period_min": 6,
     "prev_mode": "T",
-    "mode": "T",
+    "mode": "U",
     "slippage": 0.03
 }
