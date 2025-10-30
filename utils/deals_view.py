@@ -38,6 +38,7 @@ class Position(Base):
     balance_1 = Column(Float)
     native = Column(Float)
     price = Column(Float)
+    liq = Column(Float)
     step = Column(Integer)
 
 engine = create_engine("sqlite:///data/positions.db")
@@ -47,16 +48,20 @@ session = Session()
 lasts = (
     session.query(Position)
     .filter(Position.descriptor == 1)
-    .filter(Position.id >= 9)
+    .filter(Position.id >= 17)
     .order_by(Position.id.desc())
     .limit(20)
     .all()
 )
 print(lasts[0].timestamp_IN)
 print('Position:', lasts[0].position)
-print('Swaped:', lasts[0].token0_swap, lasts[0].token1_swap)
-print('Tab id:', lasts[0].id, '\n')
+print('Swaped:', -lasts[0].token1_swap, -lasts[0].token0_swap)
+print('Tab id:', lasts[0].id)
+print('Liq:', lasts[0].liq, '\n')
 lasts = list(reversed(lasts))
+
+dur_tot = (lasts[-2].timestamp_OUT - lasts[0].timestamp_IN).total_seconds() / 3600
+
 
 sum_total_0 = 0
 sum_total_1 = 0
@@ -100,8 +105,17 @@ for row in lasts[:-1]:                                                          
     print('|Gas:\t', round(row.native * row.price, 2))
     print('-'*60)
 
-print('\nTotal changes without gas:', round(sum_total_1, 2), round(sum_total_0, 6), round(-sum_total_1/sum_total_0, 2), round(sum_total_1 + sum_total_0 * row.price, 2), sep='\t')
-print('='*80+'\n')
+
+sum_0_1_tot = sum_total_1 + sum_total_0 * lasts[-2].price
+bal_0_1_tot = lasts[-2].balance_0 * lasts[-2].price + lasts[-2].balance_1
+proc_tot_calc = sum_0_1_tot / (bal_0_1_tot - sum_0_1_tot) * 100
+apr_tot_usd = proc_tot_calc/dur_tot * 365 * 24
+print('\nTotal Chngs:\t', round(sum_total_1, 2), '\tusd\t', round(sum_total_0, 6), '\teth', end='\t')
+print('\tK:', round(-sum_total_1/sum_total_0, 2), '\t\t\tSum:', round(sum_0_1_tot, 2), '\tusd', end='\t')
+print('\tSum:', round(sum_total_1 / lasts[-2].price + sum_total_0, 6), '\teth', end='\t')
+print('\tChng:', round(proc_tot_calc, 2), '\t%', end='\t')
+print('\tAPR:', round(apr_tot_usd, 2), '\t%')
+print('='*220+'\n')
 
 
 # ================================================================================================================
@@ -212,11 +226,14 @@ for pos in lasts:                               # Collect native balance losses 
         dur_cur = (pos.timestamp_OUT - pos.timestamp_IN).total_seconds() / 3600 / 24        # Duration calc
         if dur_cur < 1:
             dur_cur = 1
-        apr = proc_calc/dur_cur*365                                                 # Annual percent rate
-        testpar = apr/(avrg_p/(pos.range_MAX - pos.range_MIN))                      # Test metric  
+        apr = proc_calc/dur_cur * 365                                                 # Annual percent rate
+        # testpar = apr/(avrg_p/(pos.range_MAX - pos.range_MIN))                      # Test metric  
         print('Chng:', round(sum_total, 2), end=' ')
-        print('\tusd\t\tBal:', round(sum_amm, 2), end=' ')
-        print('\tusd\t\tChng:', round(proc_calc, 2), end=' ')
+        print('\tusd\t\tChng:', round(sum_total_alt, 6), end=' ')
+        print('\teth\t\tBal:', round(sum_amm, 2), end=' ')
+        print('\tusd\t\tBal:', round(sum_amm_alt, 6), end=' ')
+        print('\teth\t\tPrice:', round(pos.price, 2), end=' ')
+        print('\t\t\tChng:', round(proc_calc, 2), end=' ')
         print('\t%\t\tAPR:', round(apr, 2), '\t%')
     else:
         sum_total = 0
@@ -226,7 +243,7 @@ for pos in lasts:                               # Collect native balance losses 
         sum_amm = 0
         sum_amm_alt = 0
         proc_calc = 0
-        testpar = 0
+        # testpar = 0
         apr = 0
         profit_var = 0
         loss_var = 0

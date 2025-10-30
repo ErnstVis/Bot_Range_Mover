@@ -6,9 +6,10 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="eth_utils")
 
 
-chain = ChainLink('arbitrum', 'weth', 'usdc', 'uniswap', 'test', 500)
+chain = ChainLink('arbitrum', 'weth', 'usdc', 'uniswap', 'test')
 pos = BotPos(1, 0, chain)
 
+print(pos.chain.get_liquidity())
 
 
 # pos.range_width = 180
@@ -39,24 +40,24 @@ pos = BotPos(1, 0, chain)
 
 
 
-p = 3752.0807
-mn = 3662.83
-mx = 3952.05
+# p = 3752.0807
+# mn = 3662.83
+# mx = 3952.05
 
 
-w = mx - mn
-var_times = pos.dyn_period_max - pos.dyn_period_min
-var_width = pos.range_width_max - pos.range_width_min
-var_ratio = var_width / var_times
-var_aux = (w - pos.range_width_min) / var_ratio
-y = pos.dyn_period_max - var_aux
-print(y)
+# w = mx - mn
+# var_times = pos.dyn_period_max - pos.dyn_period_min
+# var_width = pos.range_width_max - pos.range_width_min
+# var_ratio = var_width / var_times
+# var_aux = (w - pos.range_width_min) / var_ratio
+# y = pos.dyn_period_max - var_aux
+# print(y)
 
 
-z1 = int(50 * (p - mn) / (mx - mn))
-z2 = 50 - z1
-print(z1, z2)
-print('\t|', '.' * z1, '|', '.' * z2, '|', sep='')
+# z1 = int(50 * (p - mn) / (mx - mn))
+# z2 = 50 - z1
+# print(z1, z2)
+# print('\t|', '.' * z1, '|', '.' * z2, '|', sep='')
 
 
 

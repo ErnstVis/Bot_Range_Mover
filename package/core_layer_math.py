@@ -11,7 +11,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 
 Base = declarative_base()
-class Position(Base):
+class Positions(Base):
     __tablename__ = "positions"
     id = Column(Integer, primary_key=True)
     descriptor = Column(Integer)
@@ -32,11 +32,13 @@ class Position(Base):
     balance_1 = Column(Float)
     native = Column(Float)
     price = Column(Float)
+    liq = Column(Float)
     step = Column(Integer)
 
 class Scan_window(Base):
     __tablename__ = "scan_window"
     id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime)
     price = Column(Float)
     search_max = Column(Float)
     search_min = Column(Float)
@@ -59,12 +61,10 @@ class BotPos:
         Session = sessionmaker(bind=engine)
         self.session = Session()
         self.db_check()
-        self.teo_max = 0
-        self.teo_min = 0
         print('-'*25, '\nInit bot layer completed\n')
 
     def db_check(self):
-        self.pos_data = self.session.query(Position).filter(Position.descriptor == self.descriptor).order_by(Position.id.desc()).first()
+        self.pos_data = self.session.query(Positions).filter(Positions.descriptor == self.descriptor).order_by(Positions.id.desc()).first()
         if self.pos_data is None:
             self.db_add()
         if self.pos_data.step == 5 or self.pos_data.step == 0:
@@ -74,11 +74,13 @@ class BotPos:
             self.P_max = self.pos_data.range_MAX
             self.P_min = self.pos_data.range_MIN
             print('Last position ID:', self.id)
+        else:
+            self.pos_data.step = 0
         self.step = self.pos_data.step
         print('Complecting of last position:', self.step)
     
     def db_add(self):
-        self.pos_data = Position(descriptor = self.descriptor, step = 0)
+        self.pos_data = Positions(descriptor = self.descriptor, step = 0)
         self.session.add(self.pos_data)
         self.session.commit()
 
@@ -213,7 +215,7 @@ class BotPos:
         # self.chain.approve_token(self.amm1, 1, 'm', wait=1)
         # self.chain.approve_token(0, 0, 'm', wait=1)
         # self.chain.approve_token(0, 1, 'm', wait=1)
-        x, x0, x1, self.id = self.chain.liq_add(self.P_min_tick, self.P_max_tick, self.amm0, self.amm1, wait=1)
+        x, x0, x1, self.id, self.L = self.chain.liq_add(self.P_min_tick, self.P_max_tick, self.amm0, self.amm1, wait=1)
         print('Pos id:', self.id)
         if x == 1:
             self.amm0 = self.chain.get_balance_token(0)
@@ -224,6 +226,7 @@ class BotPos:
             self.pos_data.token0_IN = x0
             self.pos_data.token1_IN = x1
             self.pos_data.position = self.id
+            self.pos_data.liq = self.L
             self.pos_data.range_MIN = self.chain.price_from_tick(self.P_min_tick)
             self.pos_data.range_MAX = self.chain.price_from_tick(self.P_max_tick)
             self.pos_data.step = self.step
@@ -308,18 +311,23 @@ class BotPos:
         if show:
             print('\t|', '.' * z1, '|', '.' * z2, '|', sep='')
         
-        if self.teo_max < self.P_act:
-            self.teo_max = self.P_act
-        else:
-            dif_max = self.teo_max - self.P_act
-            self.teo_max -= dif_max * 0.001
-        if self.teo_min > self.P_act or self.teo_min == 0:
-            self.teo_min = self.P_act
-        else:
-            dif_min = self.P_act - self.teo_min
-            self.teo_max += dif_min * 0.001
+        _, self.teo_max, self.teo_min = self.chain.get_liquidity()
+
+
+        # if self.teo_max < self.P_act:
+        #     self.teo_max = self.P_act
+        # else:
+        #     dif_max = self.teo_max - self.P_act
+        #     self.teo_max -= dif_max * 0.002
+        # if self.teo_min > self.P_act or self.teo_min == 0:
+        #     self.teo_min = self.P_act
+        # else:
+        #     dif_min = self.P_act - self.teo_min
+        #     self.teo_min += dif_min * 0.002
         
+
         new_pos = Scan_window(
+            timestamp = datetime.now(),
             price = self.P_act,
             search_max = self.teo_max,
             search_min = self.teo_min,
@@ -328,6 +336,10 @@ class BotPos:
         )
         self.session.add(new_pos)
         self.session.commit()
+
+        self.params["teo_max"] = self.teo_max
+        self.params["teo_min"] = self.teo_min
+        self.save_config(self.params)
 
 
     def dyn_period_scale(self):

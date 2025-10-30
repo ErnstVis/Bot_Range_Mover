@@ -7,8 +7,6 @@ import time
 import os
 import math
 import json
-# from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
-# from sqlalchemy.orm import declarative_base, sessionmaker
 from datetime import datetime
 import random
 import sys
@@ -187,7 +185,7 @@ class ChainLink:
         return self.post_transaction(transaction, wait)
 
     def approve_token(self, amount, token, target, wait=1):
-        print('\n============================ Approve operation')
+        print('\n!APP!', end=' ')
         if token == 0:
             contract_token = self.contract_token0
             decimals = self.decimals0
@@ -247,12 +245,12 @@ class ChainLink:
         try:
             slot0 = self.contract_pool.functions.slot0().call()
         except (BadResponseFormat, Web3Exception) as e:
-            print(f"Web3 error on call: {e}")
-            time.sleep(300)
+            print(f"Web3 error on call (price data parse): {e}")
+            time.sleep(30)
             return self.current_tick, self.current_price
         except Exception as e:
-            time.sleep(300)
-            print(f"Unexpected error on call: {e}")
+            time.sleep(30)
+            print(f"Unexpected error on call (price data parse): {e}")
             return self.current_tick, self.current_price
         self.current_tick = slot0[1]
         sqrtPriceX96 = slot0[0]
@@ -267,8 +265,29 @@ class ChainLink:
 
     def get_liquidity(self, tick=None):
         if tick is None:
-            self.liquidity = self.contract_pool.functions.liquidity().call()
-            return self.liquidity
+            try:
+                l_row = self.contract_pool.functions.liquidity().call()
+                row_fee0 = self.contract_pool.functions.feeGrowthGlobal0X128().call()
+                row_fee1 = self.contract_pool.functions.feeGrowthGlobal1X128().call()
+            except Exception as e:
+                print(f"Unexpected error on call (pool aux data parse): {e}")
+                time.sleep(30)
+                return self.liquidity, 0, 0
+            # print(row_fee0, row_fee1)        
+            fee0_real = row_fee0 / 2**128
+            fee1_real = row_fee1 / 2**128
+            # print(self.decimals0, self.decimals1)
+            # print(l_row)
+            if self.reversed:
+                fee0 = fee1_real / 10**self.decimals1
+                fee1 = fee0_real / 10**self.decimals0
+            else:
+                fee0 = fee0_real / 10**self.decimals0
+                fee1 = fee1_real / 10**self.decimals1
+            self.liquidity = l_row**2 / 10**(self.decimals0 + self.decimals1)
+            # print(self.liquidity)
+            # print(fee0, fee1)
+            return self.liquidity, fee0, fee1
         else:
             tick_data = self.contract_pool.functions.ticks(tick).call()
             liquidity_net = tick_data[0]
@@ -336,7 +355,7 @@ class ChainLink:
         return ammount_norm
 
     def get_swap_ammount_router(self, amount, amount_lim, token, by='I', deadline=60, wait=1):
-        print('\n============================ Swap operation ============================ START')
+        print('\n!SWP!', end=' ')
         if token:
             tokenIn = self.address_token0
             tokenOut = self.address_token1
@@ -399,12 +418,10 @@ class ChainLink:
         else:
             amm0_ok = 0
             amm1_ok = 0
-        
-        print('\n============================ Swap operation ============================ END')
         return status, amm0_ok, amm1_ok
 
     def liq_add(self, range_min, range_max, amount0, amount1, deadline=60, wait=1):
-        print('\n============================ Add liq operation ============================ START')
+        print('\n!ADD!', end=' ')
         amount0_scaled = int(amount0 * (10**self.decimals0))
         amount1_scaled = int(amount1 * (10**self.decimals1))
         if self.reversed:
@@ -455,15 +472,17 @@ class ChainLink:
                 else:
                     amm0_ok = amm0 / (10**self.decimals0)
                     amm1_ok = amm1 / (10**self.decimals1)
+            position = self.contract_manager.functions.positions(token_id).call()
+            current_liquidity = position[7]
         else:
             token_id = 0
             amm0_ok = 0
             amm1_ok = 0
-        print('\n============================ Add liq operation ============================ END')
-        return status, amm0_ok, amm1_ok, token_id
+            current_liquidity = 0
+        return status, amm0_ok, amm1_ok, token_id, current_liquidity
     
     def liq_remove(self, token_id, deadline=60, wait=1):
-        print('\n============================ Rem liq operation ============================ START')
+        print('\n!REM!', end=' ')
         position = self.contract_manager.functions.positions(token_id).call()
         current_liquidity = position[7]
         nonce, gas_price = self.pre_transaction()
@@ -496,11 +515,10 @@ class ChainLink:
         else:
             amm0_ok = 0
             amm1_ok = 0
-        print('\n============================ Rem liq operation ============================ END')
         return status, amm0_ok, amm1_ok
 
     def collect(self, token_id, wait=1):
-        print('\n============================ Collect operation ============================ START')
+        print('\n!COL!', end=' ')
         nonce, gas_price = self.pre_transaction()
         params = {
         "tokenId": token_id,
@@ -530,7 +548,6 @@ class ChainLink:
         else:
             amm0_ok = 0
             amm1_ok = 0
-        print('\n============================ Collect operation ============================ START')
         return status, amm0_ok, amm1_ok
 
     def burn(self, token_id, wait=1):
@@ -544,13 +561,13 @@ class ChainLink:
         })
         return self.post_transaction(transaction, wait)
 
-    def pre_transaction(self, gas_price_limit_gwei=0.1):
+    def pre_transaction(self, gas_price_limit_gwei=0.15):
         nonce = self.connection.eth.get_transaction_count(self.address_wallet)
         gas_price = self.connection.eth.gas_price
-        print('Recomended gas price:', self.connection.from_wei(gas_price, 'gwei'), 'gwei')
+        print('Gas:', self.connection.from_wei(gas_price, 'gwei'), 'gwei', end=' ')
         gas_price_limit = self.connection.to_wei(gas_price_limit_gwei, 'gwei')
         if gas_price > gas_price_limit:
-            print('Gas price very high. Used:', gas_price_limit_gwei)
+            print('Limited!', end=' ')
             gas_price = gas_price_limit
         return nonce, gas_price
 
@@ -558,19 +575,19 @@ class ChainLink:
         try:
             signed_transaction = self.connection.eth.account.sign_transaction(transaction, self.key_wallet)
             transaction_hash = self.connection.eth.send_raw_transaction(signed_transaction.raw_transaction)
-            print(f"Transaction sent! Hash: {self.connection.to_hex(transaction_hash)}")
+            print(f"Hash: {self.connection.to_hex(transaction_hash)}", end=' ')
             if wait:
                 try:
-                    print("Waiting for transaction receipt...")
+                    # print("Waiting for transaction receipt...")
                     receipt = self.connection.eth.wait_for_transaction_receipt(transaction_hash, timeout=120, poll_latency=2)
                     if receipt and receipt.get("status") == 1:
-                        print("Done!", receipt.get("blockNumber"))
+                        # print("Done!", receipt.get("blockNumber"))
                         return 1, receipt
                     else:
                         print("Rejected!")
                         return 0, 0
                 except TimeExhausted:
-                    print("Transaction timed out!")
+                    print("Timed out!")
                     return 9, 0
             else:
                 return -1, 0
@@ -580,343 +597,3 @@ class ChainLink:
         except Exception as e:
             print(f"Unexpected error: {e}")
             return 7, 0
-
-'''
-Base = declarative_base()
-class Position(Base):
-    __tablename__ = "positions"
-    id = Column(Integer, primary_key=True)
-    descriptor = Column(Integer)
-    position = Column(Integer)
-    range_MIN = Column(Float)
-    range_MAX = Column(Float)
-    timestamp_IN = Column(DateTime)
-    timestamp_OUT = Column(DateTime)
-    token0_IN = Column(Float)
-    token1_IN = Column(Float)
-    token0_OUT = Column(Float)
-    token1_OUT = Column(Float)
-    token0_fee = Column(Float)
-    token1_fee = Column(Float)
-    token0_swap = Column(Float)
-    token1_swap = Column(Float)
-    balance_0 = Column(Float)
-    balance_1 = Column(Float)
-    native = Column(Float)
-    price = Column(Float)
-    step = Column(Integer)
-
-
-# ===================================================================================== Bot operations
-class BotPos:
-    def __init__(self, descriptor, sim, inst_main):
-        self.chain = inst_main
-        self.sim = sim
-        self.descriptor = descriptor
-        params = BotPos.load_config()
-        for key, value in params.items():
-            setattr(self, key, value)
-        self.actuate()
-        self.range_width = self.range_width_init
-        self.slippage = 0.1
-        self.prev_mode = 'T'
-        self.mode = 'D'
-        engine = create_engine("sqlite:///data/positions.db")
-        Base.metadata.create_all(engine)
-        Session = sessionmaker(bind=engine)
-        self.session = Session()
-        self.db_check()
-        print('-'*25, '\nInit bot layer completed\n')
-
-    def db_check(self):
-        self.pos_data = self.session.query(Position).filter(Position.descriptor == self.descriptor).order_by(Position.id.desc()).first()
-        if self.pos_data is None:
-            self.db_add()
-        if self.pos_data.step == 5 or self.pos_data.step == 0:
-            self.db_add()
-        elif self.pos_data.step != 1:
-            self.id = self.pos_data.position
-            self.P_max = self.pos_data.range_MAX
-            self.P_min = self.pos_data.range_MIN
-            print('Last position ID:', self.id)
-        self.step = self.pos_data.step
-        print('Complecting of last position:', self.step)
-    
-    def db_add(self):
-        self.pos_data = Position(descriptor = self.descriptor, step = 0)
-        self.session.add(self.pos_data)
-        self.session.commit()
-
-    def proc_shift(self):
-        range_move_unknown = (self.range_move_trend + self.range_move_float) / 2
-        if self.mode == 'U' and self.prev_mode == 'U':
-            self.P_max = self.P_act + self.range_width * self.range_move_trend
-            self.P_min = self.P_act - self.range_width * (1 - self.range_move_trend)
-        elif self.mode == 'D' and self.prev_mode == 'D':
-            self.P_min = self.P_act - self.range_width * self.range_move_trend
-            self.P_max = self.P_act + self.range_width * (1 - self.range_move_trend)
-        elif self.mode == 'U' and self.prev_mode == 'D':
-            self.P_max = self.P_act + self.range_width * self.range_move_float
-            self.P_min = self.P_act - self.range_width * (1 - self.range_move_float)
-        elif self.mode == 'D' and self.prev_mode == 'U':
-            self.P_min = self.P_act - self.range_width * self.range_move_float
-            self.P_max = self.P_act + self.range_width * (1 - self.range_move_float)
-        elif self.mode == 'U' and self.prev_mode == 'T':
-            self.P_max = self.P_act + self.range_width * range_move_unknown
-            self.P_min = self.P_act - self.range_width * (1 - range_move_unknown)
-        elif self.mode == 'D' and self.prev_mode == 'T':
-            self.P_min = self.P_act - self.range_width * range_move_unknown
-            self.P_max = self.P_act + self.range_width * (1 - range_move_unknown)
-        elif self.mode == 'T':
-            self.P_min = self.P_act - self.range_width * 0.5
-            self.P_max = self.P_act + self.range_width * 0.5
-        print('\n\n\n', '=' * 25, 'Shifting, bot layer')
-        print('New TEO range:', self.P_min, self.P_max, 'Width:', self.range_width, '\n')
-
-    def proc_swap(self):
-        print('\n\n\n', '=' * 25, 'Swaping, bot layer')
-        print('Current price:', self.P_act, 'Range:', self.P_min, self.P_max)
-        print('Balances:', self.amm0, self.amm1)
-        if self.mode == 'U' or self.mode == 'D' or self.mode == 'T':                                                # mode == 'UT' or mode == 'UF':
-            self.amm1_teo_full = self.amm1 + self.amm0 * self.P_act
-            self.k0 = BotPos.clc_amm(self.P_min, self.P_max, self.P_act, 1, 0)
-            self.amm0_get_full = (self.k0 * self.amm1_teo_full) / (1 + self.k0 * self.P_act)
-            self.amm0_get = self.amm0_get_full - self.amm0
-            print("Buy operation. K0:", self.k0)
-            print('Token1 full:', self.amm1_teo_full, 'Token0 get full:', self.amm0_get_full, 'Token0 get:', self.amm0_get)
-            if self.amm0_get > 0:
-                self.amm1_limitation = self.amm0_get * self.P_act * (1 + self.slippage)
-                print('Limit1:', self.amm1_limitation)
-                # self.chain.approve_token(self.amm1_limitation, 1, 'r', wait=1)
-                # self.chain.approve_token(0, 1, 'r', wait=1)
-                x, x0, x1 = self.chain.get_swap_ammount_router(self.amm0_get, self.amm1_limitation, 0, by='Q')
-            else:
-                self.amm1_limitation = -self.amm0_get * self.P_act * (1 - self.slippage)
-                print('Limit1:', self.amm1_limitation)
-                # self.chain.approve_token(-self.amm0_get, 0, 'r', wait=1)
-                # self.chain.approve_token(0, 0, 'r', wait=1)
-                x, x0, x1 = self.chain.get_swap_ammount_router(-self.amm0_get, self.amm1_limitation, 1, by='I')
-            # self.amm1 -= self.amm0_get * self.P_act
-            # self.amm0 += self.amm0_get
-            # am0new = k * am1 / (1 + k * p)
-        elif self.mode == 'TESTME':                                              # mode == 'DT' or mode == 'DF':
-            self.amm0_teo_full = self.amm0 + self.amm1 / self.P_act
-            self.k1 = BotPos.clc_amm(self.P_min, self.P_max, self.P_act, 1, 1)
-            self.amm1_get_full = (self.k1 * self.amm0_teo_full * self.P_act) / (self.k1 + self.P_act)
-            self.amm1_get = self.amm1_get_full - self.amm1
-            print("Sell operation. K1:", self.k1)
-            print('Token0 full:', self.amm0_teo_full, 'Token1 get full:', self.amm1_get_full, 'Token1 get:', self.amm1_get)
-            if self.amm1_get > 0:
-                self.amm0_limitation = self.amm1_get / self.P_act * (1 + self.slippage)
-                print('Limit0:', self.amm0_limitation)
-                # self.chain.approve_token(self.amm0_limitation, 0, 'r', wait=1)
-                # self.chain.approve_token(0, 0, 'r', wait=1)
-                x, x0, x1 = self.chain.get_swap_ammount_router(self.amm1_get, self.amm0_limitation, 1, by='Q')
-            else:
-                self.amm0_limitation = -self.amm1_get / self.P_act * (1 - self.slippage)
-                print('Limit0:', self.amm0_limitation)
-                # self.chain.approve_token(-self.amm1_get, 1, 'r', wait=1)
-                # self.chain.approve_token(0, 1, 'r', wait=1)
-                x, x0, x1 = self.chain.get_swap_ammount_router(-self.amm1_get, self.amm0_limitation, 0, by='I')
-            # self.amm0 -= self.amm1_get / self.P_act
-            # self.amm1 += self.amm1_get  
-            # am1new = (k * am0 * p) / (k + p)
-        if x == 1:
-            self.db_check()
-            self.step = 1
-            self.pos_data.token0_swap = x0
-            self.pos_data.token1_swap = x1
-            self.pos_data.step = self.step
-            self.session.commit()
-        return x
-
-    def proc_open(self):
-        print('\n\n\n', '=' * 25, 'Opening, bot layer')
-        print('Price prev:', self.P_act)
-        self.P_act_tick, self.P_act = self.chain.get_current_tick()
-        x00 = self.P_act
-        print('\nTeo opening position assets:')
-        x01 = self.amm0 = self.chain.get_balance_token(0)
-        x02 = self.amm1 = self.chain.get_balance_token(1)
-        print('='*25)
-        if self.mode == 'U':                                                # mode == 'UT' or mode == 'UF':
-            print('Act:', self.P_act_tick, self.chain.price_from_tick(self.P_act_tick))
-            self.P_min_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_min), direction='s')
-            print('Min:', self.P_min, self.P_min_tick, self.chain.price_from_tick(self.P_min_tick))
-            self.bruto_max = BotPos.clc_rng(self.chain.price_from_tick(self.P_min_tick), self.chain.price_from_tick(self.P_act_tick), self.amm0, self.amm1)
-            print('Recalc max:', self.bruto_max)
-            self.P_max_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.bruto_max), direction='s')
-            print('Max:', self.P_max_tick, self.chain.price_from_tick(self.P_max_tick))
-            # self.amm1_lock = self.amm1
-            # self.amm0_lock = BotPos.clc_amm(self.P_min, self.P_max, self.P_act, self.amm1_lock, 0)
-            # self.L = self.amm1_lock / (math.sqrt(self.P_act) - math.sqrt(self.P_min))
-            # self.L2 = self.amm0_lock / ((math.sqrt(self.P_max) - math.sqrt(self.P_act)) / (math.sqrt(self.P_max) * math.sqrt(self.P_act)))
-        elif self.mode == 'D':                                              # mode == 'DT' or mode == 'DF':
-            print('Act:', self.P_act_tick, self.chain.price_from_tick(self.P_act_tick))
-            self.P_max_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_max), direction='s')
-            print('Max:', self.P_max, self.P_max_tick, self.chain.price_from_tick(self.P_max_tick))
-            self.bruto_min = BotPos.clc_rng(self.chain.price_from_tick(self.P_max_tick), self.chain.price_from_tick(self.P_act_tick), self.amm0, self.amm1)
-            print('Recalc min:', self.bruto_min)
-            self.P_min_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.bruto_min), direction='s')
-            print('Min:', self.P_min_tick, self.chain.price_from_tick(self.P_min_tick))
-            # self.amm0_lock = self.amm0
-            # self.amm1_lock = BotPos.clc_amm(self.P_min, self.P_max, self.P_act, self.amm0_lock, 1)
-            # self.L = self.amm1_lock / (math.sqrt(self.P_act) - math.sqrt(self.P_min))
-            # self.L2 = self.amm0_lock / ((math.sqrt(self.P_max) - math.sqrt(self.P_act)) / (math.sqrt(self.P_max) * math.sqrt(self.P_act)))
-        else:
-            print('Act:', self.P_act_tick, self.chain.price_from_tick(self.P_act_tick))
-            self.P_min_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_min), direction='s')
-            print('Min:', self.P_min, self.P_min_tick, self.chain.price_from_tick(self.P_min_tick))
-            self.P_max_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_max), direction='s')
-            print('Max:', self.P_max, self.P_max_tick, self.chain.price_from_tick(self.P_max_tick))
-        #==========================================================Approve dont needed==========================
-        # self.chain.approve_token(self.amm0, 0, 'm', wait=1)
-        # self.chain.approve_token(self.amm1, 1, 'm', wait=1)
-        # self.chain.approve_token(0, 0, 'm', wait=1)
-        # self.chain.approve_token(0, 1, 'm', wait=1)
-        x, x0, x1, self.id = self.chain.liq_add(self.P_min_tick, self.P_max_tick, self.amm0, self.amm1, wait=1)
-        print('Pos id:', self.id)
-        if x == 1:
-            self.amm0 = self.chain.get_balance_token(0)
-            self.amm1 = self.chain.get_balance_token(1)
-            self.native = self.chain.get_balance_native()
-            self.step = 2
-            self.pos_data.timestamp_IN = datetime.now()
-            print('=' * 10, 'To pool gone:', x0, x1)
-            self.pos_data.token0_IN = x0
-            self.pos_data.token1_IN = x1
-            self.pos_data.position = self.id
-            self.pos_data.range_MIN = self.chain.price_from_tick(self.P_min_tick)
-            self.pos_data.range_MAX = self.chain.price_from_tick(self.P_max_tick)
-            self.pos_data.step = self.step
-            self.pos_data.native = self.native
-            self.session.commit()
-            # print teo min exit
-            # print teo max exit
-        return x
-
-    def proc_close(self):
-        if self.step == 2:
-            time.sleep(1)
-            x, x0, x1 = self.chain.liq_remove(self.id)
-            if x == 1:
-                self.step = 3
-                self.pos_data.token0_OUT = x0
-                self.pos_data.token1_OUT = x1
-                self.pos_data.price = self.P_act
-                self.pos_data.step = self.step
-                self.session.commit()
-            return x
-        if self.step == 3:
-            time.sleep(1)
-            x, x0, x1 = self.chain.collect(self.id)
-            if x == 1:
-                self.step = 4
-                self.pos_data.timestamp_OUT = datetime.now()
-                self.pos_data.token0_fee = x0 - self.pos_data.token0_OUT
-                self.pos_data.token1_fee = x1 - self.pos_data.token1_OUT
-                self.pos_data.step = self.step
-                self.session.commit()
-            return x
-        if self.step == 4:
-            time.sleep(1)
-            # x, _ = self.chain.burn(self.id)
-            x = 1
-            self.amm0 = self.chain.get_balance_token(0)
-            self.amm1 = self.chain.get_balance_token(1)
-            if x == 1:
-                self.step = 5
-                self.pos_data.balance_0 = self.amm0
-                self.pos_data.balance_1 = self.amm1
-                self.pos_data.step = self.step
-                self.session.commit()
-            return x
-        return 0
-        # if mode == 'UT' or mode == 'UF':
-        #     self.amm0_lock = 0
-        #     self.amm1_lock = self.L * (math.sqrt(self.P_max) - math.sqrt(self.P_min))
-        # elif mode == 'DT' or mode == 'DF':
-        #     self.amm0_lock = self.L * (math.sqrt(self.P_max) - math.sqrt(self.P_min)) / (math.sqrt(self.P_max) * math.sqrt(self.P_min))
-        #     self.amm1_lock = 0
-        # self.L = 0
-
-    def proc_modify(self):
-        if self.mode == 'T':
-            self.range_width *= self.range_scale_stable
-        else:
-            self.range_width *= self.range_scale_fluctuate
-        if self.range_width > self.range_width_max:
-            self.range_width = self.range_width_max
-        if self.range_width < self.range_width_min:
-            self.range_width = self.range_width_min
-
-    def actuate(self, show=1):
-        if show:
-            print('Refresh values =================')
-        self.amm0 = self.chain.get_balance_token(0, show)
-        self.amm1 = self.chain.get_balance_token(1, show)
-        self.native = self.chain.get_balance_native(show)
-        self.P_act_tick, self.P_act = self.chain.get_current_tick(show)
-        print('\n')
-
-    def actuate_short(self, show=1):
-        if show:
-            print(datetime.now(), end=' ')
-        self.P_act_tick, self.P_act = self.chain.get_current_tick(show)
-        z1 = int(50 * (self.P_act - self.P_min) / (self.P_max - self.P_min))
-        z1 = max(0, min(z1, 50))
-        z2 = 50 - z1
-        print('\t|', '.' * z1, '|', '.' * z2, '|', sep='')
-
-    def dyn_period_scale(self):
-        var_times = self.dyn_period_max - self.dyn_period_min
-        var_width = self.range_width_max - self.range_width_min
-        var_ratio = var_width / var_times
-        var_aux = (self.range_width - self.range_width_min) / var_ratio
-        return self.dyn_period_max - var_aux
-    
-    def test_min_width(self):
-        return self.range_width * ((self.range_scale_stable + 1) / 2) > self.range_width_min
-
-
-
-    @staticmethod
-    def clc_amm(P_min, P_max, P, ammount_in, target):
-        if target:
-            L = ammount_in / ((math.sqrt(P_max) - math.sqrt(P)) / (math.sqrt(P_max) * math.sqrt(P)))
-            ammount_out = L * (math.sqrt(P) - math.sqrt(P_min))
-        else:
-            L = ammount_in / (math.sqrt(P) - math.sqrt(P_min))
-            ammount_out = L * (math.sqrt(P_max) - math.sqrt(P)) / (math.sqrt(P_max) * math.sqrt(P))
-        return ammount_out
-    
-    @staticmethod
-    def clc_rng(P_border, P, ammount_0, ammount_1):
-        if P_border > P:
-            sqrt_P = math.sqrt(P)
-            sqrt_P_max = math.sqrt(P_border)
-            L = ammount_0 / ((sqrt_P_max - sqrt_P) / (sqrt_P_max * sqrt_P))
-            P_min = (sqrt_P - ammount_1 / L) ** 2
-            return P_min
-        else:
-            sqrt_P = math.sqrt(P)
-            sqrt_P_min= math.sqrt(P_border)
-            L = ammount_1 / (sqrt_P - sqrt_P_min)
-            # ammount_0 = L * (math.sqrt(P_max) - math.sqrt(P)) / (math.sqrt(P_max) * math.sqrt(P))
-            # ammount_0 / L = (math.sqrt(P_max) - math.sqrt(P)) / (math.sqrt(P_max) * math.sqrt(P))
-            # math.sqrt(P_max) * math.sqrt(P) * (ammount_0 / L) = math.sqrt(P_max) - math.sqrt(P)
-            # math.sqrt(P_max) - math.sqrt(P_max) * math.sqrt(P) * (ammount_0 / L) = math.sqrt(P)
-            # math.sqrt(P_max) * (1 - math.sqrt(P) * (ammount_0 / L)) = math.sqrt(P)
-            # math.sqrt(P_max) = math.sqrt(P) / (1 - math.sqrt(P) * (ammount_0 / L))
-            P_max = (sqrt_P / (1 - sqrt_P * (ammount_0 / L))) ** 2
-            return P_max
-    
-    @staticmethod
-    def load_config(path='config/params.json'):
-        with open(path, 'r') as f:
-            return json.load(f)
-    
-    def save_config(config, path='config/params.json'):
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(config, f, indent=4, ensure_ascii=False)
-'''
