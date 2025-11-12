@@ -1,81 +1,121 @@
 from package import BotPos, ChainLink
 import time
+import argparse
 from datetime import datetime, timedelta
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="eth_utils")
 
+def main():
+    parser = argparse.ArgumentParser(description="Example script with arguments.")
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default='arb_uni3_eth',
+        help="bot mode, chain, proto, etc",
+    )    
+    parser.add_argument(
+        "--trade",
+        type=str,
+        default='on',
+        help="bot mode, chain, proto, etc",
+    )
+    args = parser.parse_args()
+    if args.mode == 'arb_uni3_eth':
+        ch = 'arbitrum'
+        tok0 = 'weth'
+        tok1 = 'usdc'
+        proto = 'uniswap'
+        desc = 1
+        print('Running in arb_uni3_eth mode... Descriptor 1')
+    elif args.mode == 'pol_uni3_eth':
+        ch = 'polygon'
+        tok0 = 'weth'
+        tok1 = 'usdt'
+        proto = 'uniswap'
+        desc = 2
+        print('Running in pol_uni3_eth mode... Descriptor 2')
+    else:
+        print('Unknown mode arg...')
+        return
+    if args.trade == 'on':
+        trade_on = True
+        print('Trading is ON')
+    else:
+        trade_on = False
+        print('Trading is OFF')
 
+    chain = ChainLink(ch, tok0, tok1, proto, 'test')
+    pos = BotPos(desc, 0, chain)
 
-chain = ChainLink('arbitrum', 'weth', 'usdc', 'uniswap', 'test')
-pos = BotPos(1, 0, chain)
+    # =========================== ROUTINE ================================
+    while True:
+        # JOB PROCESSING OR JUST DATA COLLECTION
+        if trade_on:
+            if pos.step == 0:      # Begined
+                pos.proc_shift()
+                if pos.proc_swap() != 1:
+                    print('\nSTATUS NOT 1...')
+                    time.sleep(30)
+                    continue
+            elif pos.step == 1:
+                if pos.proc_open() != 1:
+                    print('\nSTATUS NOT 1...')
+                    time.sleep(30)
+                    continue
+            elif pos.step == 2:                     # Opened
+                pos.actuate_win()
+                if pos.P_act > pos.P_max:
+                    if pos.proc_close() != 1:
+                        print('\nSTATUS NOT 1...')
+                        time.sleep(30)
+                        continue
+                    pos.prev_mode = pos.mode
+                    pos.mode = 'U'
+                    pos.params = pos.load_config(desc)
+                    pos.params["prev_mode"] = pos.prev_mode
+                    pos.params["mode"] = pos.mode
+                    pos.save_config(pos.params, desc)
+                    continue
+                elif pos.P_act < pos.P_min:
+                    if pos.proc_close() != 1:
+                        print('\nSTATUS NOT 1...')
+                        time.sleep(30)
+                        continue
+                    pos.prev_mode = pos.mode
+                    pos.mode = 'D'
+                    pos.params = pos.load_config(desc)
+                    pos.params["prev_mode"] = pos.prev_mode
+                    pos.params["mode"] = pos.mode
+                    pos.save_config(pos.params, desc)
+                    continue
+                elif pos.pos_data.timestamp_IN and datetime.now() - pos.pos_data.timestamp_IN > timedelta(hours=pos.dyn_period_scale()) and pos.test_min_width():
+                    if pos.proc_close() != 1:
+                        print('\nSTATUS NOT 1...')
+                        time.sleep(30)
+                        continue
+                    pos.prev_mode = pos.mode
+                    pos.mode = 'T'
+                    pos.params = pos.load_config(desc)
+                    pos.params["prev_mode"] = pos.prev_mode
+                    pos.params["mode"] = pos.mode
+                    pos.save_config(pos.params, desc)
+                    continue
+                time.sleep(60)
+            elif pos.step == 3 or pos.step == 4:
+                if pos.proc_close() != 1:
+                    print('\nSTATUS NOT 1...')
+                    time.sleep(30)
+                    continue
+            elif pos.step == 5:
+                pos.proc_modify()
+                pos.params = pos.load_config(desc)
+                pos.params["range_width"] = pos.range_width
+                pos.save_config(pos.params, desc)
+                pos.step = 0
 
+        else:
+            pos.actuate_win()
+            time.sleep(60)
 
-
-# =========================== ROUTINE ================================
-while True:
-    # Check step
-    if pos.step == 0:      # Begined
-        pos.proc_shift()
-        if pos.proc_swap() != 1:
-            print('\nSTATUS NOT 1...')
-            time.sleep(30)
-            continue
-    elif pos.step == 1:
-        if pos.proc_open() != 1:
-            print('\nSTATUS NOT 1...')
-            time.sleep(30)
-            continue
-    elif pos.step == 2:                     # Opened
-        pos.actuate_short()
-        if pos.P_act > pos.P_max:
-            if pos.proc_close() != 1:
-                print('\nSTATUS NOT 1...')
-                time.sleep(30)
-                continue
-            pos.prev_mode = pos.mode
-            pos.mode = 'U'
-            pos.params["prev_mode"] = pos.prev_mode
-            pos.params["mode"] = pos.mode
-            pos.save_config(pos.params)
-            continue
-        elif pos.P_act < pos.P_min:
-            if pos.proc_close() != 1:
-                print('\nSTATUS NOT 1...')
-                time.sleep(30)
-                continue
-            pos.prev_mode = pos.mode
-            pos.mode = 'D'
-            pos.params["prev_mode"] = pos.prev_mode
-            pos.params["mode"] = pos.mode
-            pos.save_config(pos.params)
-            continue
-        elif pos.pos_data.timestamp_IN and datetime.now() - pos.pos_data.timestamp_IN > timedelta(hours=pos.dyn_period_scale()) and pos.test_min_width():
-            if pos.proc_close() != 1:
-                print('\nSTATUS NOT 1...')
-                time.sleep(30)
-                continue
-            pos.prev_mode = pos.mode
-            pos.mode = 'T'
-            pos.params["prev_mode"] = pos.prev_mode
-            pos.params["mode"] = pos.mode
-            pos.save_config(pos.params)
-            continue
-        time.sleep(60)
-    elif pos.step == 3 or pos.step == 4:
-        if pos.proc_close() != 1:
-            print('\nSTATUS NOT 1...')
-            time.sleep(30)
-            continue
-    elif pos.step == 5:
-        pos.proc_modify()
-        pos.params["range_width"] = pos.range_width
-        pos.save_config(pos.params)
-        pos.step = 0
-
-
-
-
-
-
-
-
+if __name__ == "__main__":
+    main()

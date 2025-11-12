@@ -62,7 +62,6 @@ class ChainLink:
         else:
             print("Not connected!")
         print('Address my:', self.address_wallet)
-        self.fee = 500                                                  # set contracts
         self.address_pool = ''
         self.contract_token0 = self.connection.eth.contract(address=self.address_token0, abi=self.abi_token)
         self.contract_token1 = self.connection.eth.contract(address=self.address_token1, abi=self.abi_token)
@@ -70,41 +69,37 @@ class ChainLink:
         self.contract_router = self.connection.eth.contract(address=self.address_router, abi=self.abi_router)
         self.contract_quoter = self.connection.eth.contract(address=self.address_quoter, abi=self.abi_quoter)
         self.contract_manager = self.connection.eth.contract(address=self.address_manager, abi=self.abi_manager)
-        # self.address_pool = self.contract_factory.functions.getPool(self.address_token0, self.address_token1, self.fee).call()          #======== Dyn mod replace
-        # print('Address pool:', self.address_pool)
-        # self.contract_pool = self.connection.eth.contract(address=self.address_pool, abi=self.abi_pool)
-        # self.address_token0_pool = self.contract_pool.functions.token0().call() 
-        # self.address_token1_pool = self.contract_pool.functions.token1().call()          #======== Dyn mod replace
         self.decimals0 = self.contract_token0.functions.decimals().call()
         self.name0 = self.contract_token0.functions.name().call()
         self.symbol0 = self.contract_token0.functions.symbol().call()
         self.decimals1 = self.contract_token1.functions.decimals().call()
         self.name1 = self.contract_token1.functions.name().call()
         self.symbol1 = self.contract_token1.functions.symbol().call()
-        # if self.address_token0_pool.lower() == self.address_token0.lower() and self.address_token1_pool.lower() == self.address_token1.lower():
-        #     self.reversed = 0
-        # else:
-        #     self.reversed = 1
         self.chain_id = self.connection.eth.chain_id
-        # self.tick_spacing = self.contract_pool.functions.tickSpacing().call()
-        # print('Reversion:', self.reversed)
-        self.dyn_pool_swich()
-        print('-'*25, '\nInit chain layer completed\n')
+        self.address_pool_100 = self.contract_factory.functions.getPool(self.address_token0, self.address_token1, 100).call()
+        self.address_pool_500 = self.contract_factory.functions.getPool(self.address_token0, self.address_token1, 500).call()
+        self.address_pool_3000 = self.contract_factory.functions.getPool(self.address_token0, self.address_token1, 3000).call()
+        self.contract_pool_100 = self.connection.eth.contract(address=self.address_pool_100, abi=self.abi_pool)
+        self.contract_pool_500 = self.connection.eth.contract(address=self.address_pool_500, abi=self.abi_pool)
+        self.contract_pool_3000 = self.connection.eth.contract(address=self.address_pool_3000, abi=self.abi_pool)
+        self.tick_spacing_100 = self.contract_pool_100.functions.tickSpacing().call()
+        self.tick_spacing_500 = self.contract_pool_500.functions.tickSpacing().call()
+        self.tick_spacing_3000 = self.contract_pool_3000.functions.tickSpacing().call()
+        self.reversed_100 = self.is_reversed(self.contract_pool_100, self.address_token0, self.address_token1)
+        self.reversed_500 = self.is_reversed(self.contract_pool_500, self.address_token0, self.address_token1)
+        self.reversed_3000 = self.is_reversed(self.contract_pool_3000, self.address_token0, self.address_token1)
 
-    def dyn_pool_swich(self):
-        address_pool_new = self.contract_factory.functions.getPool(self.address_token0, self.address_token1, self.fee).call()
-        if address_pool_new.lower() != self.address_pool.lower():
-            print('Pool changed:', self.address_pool, '->', address_pool_new)
-            self.address_pool = address_pool_new
-            self.contract_pool = self.connection.eth.contract(address=self.address_pool, abi=self.abi_pool)
-            self.address_token0_pool = self.contract_pool.functions.token0().call() 
-            self.address_token1_pool = self.contract_pool.functions.token1().call()
-            if self.address_token0_pool.lower() == self.address_token0.lower() and self.address_token1_pool.lower() == self.address_token1.lower():
-                self.reversed = 0
-            else:
-                self.reversed = 1
-            self.tick_spacing = self.contract_pool.functions.tickSpacing().call()
-            print('Reversion:', self.reversed)
+        # self.dyn_pool_swich()
+        print('-'*25, '\nInit chain layer completed\n')
+        
+    @staticmethod    
+    def is_reversed(cont, ad_tok0, ad_tok1):
+        addr0 = cont.functions.token0().call() 
+        addr1 = cont.functions.token1().call()
+        if addr0.lower() == ad_tok0.lower() and addr1.lower() == ad_tok1.lower():
+            return 0
+        else:
+            return 1
 
     def get_balance_native(self, show=1):
         try:
@@ -138,10 +133,10 @@ class ChainLink:
             balance = contract.functions.balanceOf(self.address_wallet).call()
         except (BadResponseFormat, Web3Exception) as e:
             print(f"Web3 error on call: {e}")
-            time.sleep(300)
+            time.sleep(30)
         except Exception as e:
             print(f"Unexpected error on call: {e}")
-            time.sleep(300)
+            time.sleep(30)
         else:
             balance_token = balance / 10**decimals
             if token == 0:
@@ -227,23 +222,44 @@ class ChainLink:
         allowance = contract_token.functions.allowance(self.address_wallet, address).call()
         return allowance / 10**decimals
     
-    def price_from_tick(self, tick):
-        if self.reversed:
+    def price_from_tick(self, tick, fee):
+        if fee == 100:
+            reversed = self.reversed_100
+        elif fee == 500:
+            reversed = self.reversed_500
+        elif fee == 3000:
+            reversed = self.reversed_3000
+        if reversed:
             P = (1 / (1.0001**tick)) * 10**(self.decimals0 - self.decimals1)
         else:
             P = (1.0001**tick) * 10**(self.decimals0 - self.decimals1)
         return(P)
 
-    def tick_from_price(self, P):
-        if self.reversed:
+    def tick_from_price(self, P, fee):
+        if fee == 100:
+            reversed = self.reversed_100
+        elif fee == 500:
+            reversed = self.reversed_500
+        elif fee == 3000:
+            reversed = self.reversed_3000
+        if reversed:
             tick = math.log(1 / P * 10**(self.decimals0 - self.decimals1)) / math.log(1.0001)
         else:
             tick = math.log(P * 10**(self.decimals1 - self.decimals0)) / math.log(1.0001)
         return(tick)
     
-    def get_current_tick(self, show=1):
+    def get_current_tick(self, fee, show=1):
+        if fee == 100:
+            cont = self.contract_pool_100
+            reversed = self.reversed_100
+        elif fee == 500:
+            cont = self.contract_pool_500
+            reversed = self.reversed_500
+        elif fee == 3000:
+            cont = self.contract_pool_3000
+            reversed = self.reversed_3000
         try:
-            slot0 = self.contract_pool.functions.slot0().call()
+            slot0 = cont.functions.slot0().call()
         except (BadResponseFormat, Web3Exception) as e:
             print(f"Web3 error on call (price data parse): {e}")
             time.sleep(30)
@@ -255,7 +271,7 @@ class ChainLink:
         self.current_tick = slot0[1]
         sqrtPriceX96 = slot0[0]
         price = (sqrtPriceX96 / 2**96) ** 2
-        if self.reversed:
+        if reversed:
             self.current_price = (1 / price) * 10**(self.decimals0 - self.decimals1)
         else:
             self.current_price = price * 10**(self.decimals0 - self.decimals1)
@@ -263,73 +279,91 @@ class ChainLink:
             print('Cur price:', round(self.current_price, 3), end=' ')
         return self.current_tick, self.current_price
 
-    def get_liquidity(self, tick=None):
+    def get_liquidity(self, fee, tick=None):
+        if fee == 100:
+            cont = self.contract_pool_100
+            reversed = self.reversed_100
+        elif fee == 500:
+            cont = self.contract_pool_500
+            reversed = self.reversed_500
+        elif fee == 3000:
+            cont = self.contract_pool_3000
+            reversed = self.reversed_3000
         if tick is None:
             try:
-                l_row = self.contract_pool.functions.liquidity().call()
-                row_fee0 = self.contract_pool.functions.feeGrowthGlobal0X128().call()
-                row_fee1 = self.contract_pool.functions.feeGrowthGlobal1X128().call()
+                l_row = cont.functions.liquidity().call()
+                row_fee0 = cont.functions.feeGrowthGlobal0X128().call()
+                row_fee1 = cont.functions.feeGrowthGlobal1X128().call()
             except Exception as e:
                 print(f"Unexpected error on call (pool aux data parse): {e}")
                 time.sleep(30)
-                return self.liquidity, 0, 0
+                return 0, 0, 0
             # print(row_fee0, row_fee1)        
             fee0_real = row_fee0 / 2**128
             fee1_real = row_fee1 / 2**128
             # print(self.decimals0, self.decimals1)
             # print(l_row)
-            if self.reversed:
+            if reversed:
                 fee0 = fee1_real / 10**self.decimals1
                 fee1 = fee0_real / 10**self.decimals0
             else:
                 fee0 = fee0_real / 10**self.decimals0
                 fee1 = fee1_real / 10**self.decimals1
-            self.liquidity = l_row**2 / 10**(self.decimals0 + self.decimals1)
-            # print(self.liquidity)
+            liquidity = l_row**2 / 10**(self.decimals0 + self.decimals1)
+            # print(liquidity)
             # print(fee0, fee1)
-            return self.liquidity, fee0, fee1
+            return liquidity, fee0, fee1
         else:
-            tick_data = self.contract_pool.functions.ticks(tick).call()
+            tick_data = cont.functions.ticks(tick).call()
             liquidity_net = tick_data[0]
             liquidity_gross = tick_data[1]
             return liquidity_net, liquidity_gross            
 
-    def tick_normalize(self, tick, direction=''):
-        if self.reversed:
+    def tick_normalize(self, tick, fee, direction=''):
+        if fee == 100:
+            reversed = self.reversed_100
+            spacing = self.tick_spacing_100
+        elif fee == 500:
+            reversed = self.reversed_500
+            spacing = self.tick_spacing_500
+        elif fee == 3000:
+            reversed = self.reversed_3000
+            spacing = self.tick_spacing_3000
+        if reversed:
             if direction == 'smx':
-                tick_corrected = tick - tick % self.tick_spacing
+                tick_corrected = tick - tick % spacing
             elif direction == 'smn':
-                tick_corrected = tick - tick % self.tick_spacing + self.tick_spacing
+                tick_corrected = tick - tick % spacing + spacing
             elif direction == 'mx':
                 tick_corrected = math.floor(tick)
             elif direction == 'mn':
                 tick_corrected = math.ceil(tick)
             elif direction == 's':
-                if tick % self.tick_spacing >= self.tick_spacing / 2:
-                    tick_corrected = tick - tick % self.tick_spacing + self.tick_spacing
+                if tick % spacing >= spacing / 2:
+                    tick_corrected = tick - tick % spacing + spacing
                 else:
-                    tick_corrected = tick - tick % self.tick_spacing
+                    tick_corrected = tick - tick % spacing
             else:
                 tick_corrected = round(tick)
         else:
             if direction == 'smn':
-                tick_corrected = tick - tick % self.tick_spacing
+                tick_corrected = tick - tick % spacing
             elif direction == 'smx':
-                tick_corrected = tick - tick % self.tick_spacing + self.tick_spacing
+                tick_corrected = tick - tick % spacing + spacing
             elif direction == 'mn':
                 tick_corrected = math.floor(tick)
             elif direction == 'mx':
                 tick_corrected = math.ceil(tick)
             elif direction == 's':
-                if tick % self.tick_spacing >= self.tick_spacing / 2:
-                    tick_corrected = tick - tick % self.tick_spacing + self.tick_spacing
+                if tick % spacing >= spacing / 2:
+                    tick_corrected = tick - tick % spacing + spacing
                 else:
-                    tick_corrected = tick - tick % self.tick_spacing
+                    tick_corrected = tick - tick % spacing
             else:
                 tick_corrected = round(tick)
         return int(tick_corrected)
 
-    def get_swap_ammount_quoter(self, amount, token, by='I'):
+    def get_swap_ammount_quoter(self, amount, token, fee, by='I'):
         if token:
             tokenIn = self.address_token0
             tokenOut = self.address_token1
@@ -342,11 +376,11 @@ class ChainLink:
             amount_scaled = int(amount * (10**self.decimals0))
         if by == 'I':
             amount_row = self.contract_quoter.functions.quoteExactInputSingle(
-            tokenIn, tokenOut, self.fee, amount_scaled, 0
+            tokenIn, tokenOut, fee, amount_scaled, 0
             ).call()
         elif by == 'Q':
             amount_row = self.contract_quoter.functions.quoteExactOutputSingle(
-            tokenIn, tokenOut, self.fee, amount_scaled, 0
+            tokenIn, tokenOut, fee, amount_scaled, 0
             ).call()
         if (token == 0 and by == 'I') or (token == 1 and by == 'Q'):
             ammount_norm = amount_row / (10 ** self.decimals0)
@@ -354,8 +388,17 @@ class ChainLink:
             ammount_norm = amount_row / (10 ** self.decimals1)
         return ammount_norm
 
-    def get_swap_ammount_router(self, amount, amount_lim, token, by='I', deadline=60, wait=1):
+    def get_swap_ammount_router(self, amount, amount_lim, token, fee, by='I', deadline=60, wait=1):
         print('\n!SWP!', end=' ')
+        if fee == 100:
+            cont = self.contract_pool_100
+            reversed = self.reversed_100
+        elif fee == 500:
+            cont = self.contract_pool_500
+            reversed = self.reversed_500
+        elif fee == 3000:
+            cont = self.contract_pool_3000
+            reversed = self.reversed_3000
         if token:
             tokenIn = self.address_token0
             tokenOut = self.address_token1
@@ -373,7 +416,7 @@ class ChainLink:
             params = {
             "tokenIn": tokenIn,
             "tokenOut": tokenOut,
-            "fee": self.fee,
+            "fee": fee,
             "recipient": self.address_wallet,
             "deadline": int(time.time()) + deadline,
             "amountIn": amount_scaled,
@@ -390,7 +433,7 @@ class ChainLink:
             params = {
             "tokenIn": tokenIn,
             "tokenOut": tokenOut,
-            "fee": self.fee,
+            "fee": fee,
             "recipient": self.address_wallet,
             "deadline": int(time.time()) + deadline,
             "amountOut": amount_scaled,
@@ -405,11 +448,11 @@ class ChainLink:
             })
         status, receipt = self.post_transaction(transaction, wait)
         if status == 1:
-            events = self.contract_pool.events.Swap().process_receipt(receipt)
+            events = cont.events.Swap().process_receipt(receipt)
             for e in events:
                 amm0 = e["args"]["amount0"]
                 amm1 = e["args"]["amount1"]
-                if self.reversed:
+                if reversed:
                     amm0_ok = amm1 / (10**self.decimals0)
                     amm1_ok = amm0 / (10**self.decimals1)
                 else:
@@ -420,11 +463,17 @@ class ChainLink:
             amm1_ok = 0
         return status, amm0_ok, amm1_ok
 
-    def liq_add(self, range_min, range_max, amount0, amount1, deadline=60, wait=1):
+    def liq_add(self, range_min, range_max, amount0, amount1, fee, deadline=60, wait=1):
         print('\n!ADD!', end=' ')
+        if fee == 100:
+            reversed = self.reversed_100
+        elif fee == 500:
+            reversed = self.reversed_500
+        elif fee == 3000:
+            reversed = self.reversed_3000
         amount0_scaled = int(amount0 * (10**self.decimals0))
         amount1_scaled = int(amount1 * (10**self.decimals1))
-        if self.reversed:
+        if reversed:
             lower = range_max
             upper = range_min
             address_token0_corrected = self.address_token1
@@ -438,11 +487,11 @@ class ChainLink:
             address_token1_corrected = self.address_token1
             amount0_corrected = amount0_scaled
             amount1_corrected = amount1_scaled
-        nonce, gas_price = self.pre_transaction()
+        nonce, gas_price = self.pre_transaction(gas_price_limit_gwei=0.17)
         params = {
         "token0": address_token0_corrected,
         "token1": address_token1_corrected,
-        "fee": self.fee,
+        "fee": fee,
         "tickLower": lower,
         "tickUpper": upper,
         "amount0Desired": amount0_corrected,
@@ -466,7 +515,7 @@ class ChainLink:
                 token_id = e["args"]["tokenId"]
                 amm0 = e["args"]["amount0"]
                 amm1 = e["args"]["amount1"]            
-                if self.reversed:
+                if reversed:
                     amm0_ok = amm1 / (10**self.decimals0)
                     amm1_ok = amm0 / (10**self.decimals1)
                 else:
@@ -481,8 +530,14 @@ class ChainLink:
             current_liquidity = 0
         return status, amm0_ok, amm1_ok, token_id, current_liquidity
     
-    def liq_remove(self, token_id, deadline=60, wait=1):
+    def liq_remove(self, token_id, fee, deadline=60, wait=1):
         print('\n!REM!', end=' ')
+        if fee == 100:
+            reversed = self.reversed_100
+        elif fee == 500:
+            reversed = self.reversed_500
+        elif fee == 3000:
+            reversed = self.reversed_3000
         position = self.contract_manager.functions.positions(token_id).call()
         current_liquidity = position[7]
         nonce, gas_price = self.pre_transaction()
@@ -506,7 +561,7 @@ class ChainLink:
             for e in events:
                 amm0 = e["args"]["amount0"]
                 amm1 = e["args"]["amount1"]
-                if self.reversed:
+                if reversed:
                     amm0_ok = amm1 / (10**self.decimals0)
                     amm1_ok = amm0 / (10**self.decimals1)
                 else:
@@ -517,9 +572,15 @@ class ChainLink:
             amm1_ok = 0
         return status, amm0_ok, amm1_ok
 
-    def collect(self, token_id, wait=1):
+    def collect(self, token_id, fee, wait=1):
         print('\n!COL!', end=' ')
-        nonce, gas_price = self.pre_transaction()
+        if fee == 100:
+            reversed = self.reversed_100
+        elif fee == 500:
+            reversed = self.reversed_500
+        elif fee == 3000:
+            reversed = self.reversed_3000
+        nonce, gas_price = self.pre_transaction(gas_price_limit_gwei=0.17)
         params = {
         "tokenId": token_id,
         "recipient": self.address_wallet,
@@ -539,7 +600,7 @@ class ChainLink:
             for e in events:
                 amm0 = e["args"]["amount0"]
                 amm1 = e["args"]["amount1"]
-                if self.reversed:
+                if reversed:
                     amm0_ok = amm1 / (10**self.decimals0)
                     amm1_ok = amm0 / (10**self.decimals1)
                 else:

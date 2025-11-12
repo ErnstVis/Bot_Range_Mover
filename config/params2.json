@@ -8,9 +8,9 @@
     "range_width": 292.9600000000001,
     "dyn_period_max": 24,
     "dyn_period_min": 6,
-    "prev_mode": "T",
-    "mode": "D",
+    "prev_mode": "U",
+    "mode": "T",
     "slippage": 0.03,
-    "teo_max": 2.973799457642734e-15,
-    "teo_min": 6.0388382495497956e-12
+    "teo_max": 2.971186477894462e-15,
+    "teo_min": 6.0296994308945506e-12
 }

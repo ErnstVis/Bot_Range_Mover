@@ -60,11 +60,21 @@ print('Tab id:', lasts[0].id)
 print('Liq:', lasts[0].liq, '\n')
 lasts = list(reversed(lasts))
 
-dur_tot = (lasts[-2].timestamp_OUT - lasts[0].timestamp_IN).total_seconds() / 3600
-
-
+price_ref = lasts[-2].price
+balance_ref = lasts[-2].balance_0 * price_ref + lasts[-2].balance_1
+start_time_ref = lasts[0].timestamp_IN
+sum_0_1_tot_list = []
+sum_0_1_fee_list = []
+bal_0_1_tot_list = []
+proc_tot_calc_list = []
+teo_balance_list = []
 sum_total_0 = 0
 sum_total_1 = 0
+sum_fee_0 = 0
+sum_fee_1 = 0
+bal_0_max = max(pos.balance_0 for pos in lasts[:-1])
+bal_1_max = max(pos.balance_1 for pos in lasts[:-1])
+
 for row in lasts[:-1]:                                                                                  # Part with positions text description
     print('|', row.id, ':\t', round(row.range_MIN, 2), '\r\t\t\t', round(row.range_MAX, 2), end='\r\t\t\t\t\t\t')
     print(round(row.price, 2))
@@ -78,7 +88,20 @@ for row in lasts[:-1]:                                                          
     print(round(row.balance_0 * row.price + row.balance_1, 2))
     sum_total_0 += sum_0
     sum_total_1 += sum_1
+    sum_fee_0 += row.token0_fee
+    sum_fee_1 += row.token1_fee
     course = -sum_1/sum_0
+    dur_tot_d = (row.timestamp_OUT - start_time_ref).total_seconds() / 3600 / 24
+    dur_tot_y = dur_tot_d / 365
+    sum_0_1_tot = sum_total_0 * row.price + sum_total_1
+    sum_0_1_fee = sum_fee_0 * row.price + sum_fee_1
+    bal_0_1_tot = row.balance_0 * price_ref + row.balance_1
+    proc_tot_calc = sum_0_1_tot / (bal_0_1_tot - sum_0_1_tot) * 100
+    apr_tot_usd = proc_tot_calc/dur_tot_y
+    sum_0_1_tot_list.append(sum_0_1_tot)
+    sum_0_1_fee_list.append(sum_0_1_fee)
+    bal_0_1_tot_list.append(bal_0_1_tot)
+    proc_tot_calc_list.append(proc_tot_calc)
     print('|Chng:\t', round(sum_1, 2), '\r\t\t\t', round(sum_0, 6), end='\r'+'\t'*6)
     print(round(sum_0 * row.price + sum_1, 2))
     print('|Koef:\t', round(course, 2), end='\r\t\t\t')
@@ -102,22 +125,38 @@ for row in lasts[:-1]:                                                          
         print('loss')
     elif sum_0 > 0 and sum_1 > 0:
         print('profit')
-    print('|Gas:\t', round(row.native * row.price, 2))
+    print('|Gas:\t', round(row.native * price_ref, 2))
     print('-'*60)
+    teo_balance = ((row.balance_0 / bal_0_max) + (row.balance_1 / bal_1_max)) * 10
+    teo_balance_list.append(teo_balance)
 
-
-sum_0_1_tot = sum_total_1 + sum_total_0 * lasts[-2].price
-bal_0_1_tot = lasts[-2].balance_0 * lasts[-2].price + lasts[-2].balance_1
-proc_tot_calc = sum_0_1_tot / (bal_0_1_tot - sum_0_1_tot) * 100
-apr_tot_usd = proc_tot_calc/dur_tot * 365 * 24
+print('Statistic period total:', round(dur_tot_d, 3), 'days,', round(dur_tot_y, 3), 'years')
 print('\nTotal Chngs:\t', round(sum_total_1, 2), '\tusd\t', round(sum_total_0, 6), '\teth', end='\t')
 print('\tK:', round(-sum_total_1/sum_total_0, 2), '\t\t\tSum:', round(sum_0_1_tot, 2), '\tusd', end='\t')
-print('\tSum:', round(sum_total_1 / lasts[-2].price + sum_total_0, 6), '\teth', end='\t')
+print('\tSum:', round(sum_total_1 / price_ref + sum_total_0, 6), '\teth', end='\t')
 print('\tChng:', round(proc_tot_calc, 2), '\t%', end='\t')
 print('\tAPR:', round(apr_tot_usd, 2), '\t%')
 print('='*220+'\n')
 
 
+
+# =================================================================================== PLOTTING
+plt.style.use('dark_background')
+x = np.arange(len(lasts[:-1]))
+fig, ax1 = plt.subplots(figsize=(18, 12))
+ax1.plot(x, sum_0_1_tot_list, color="orange", linewidth=2, label="Amm delta usd, runing price")
+ax1.plot(x, sum_0_1_fee_list, color="cyan", linewidth=2, label="Fees usd, runing price")
+ax1.plot(x, teo_balance_list, color="red", linewidth=2, label="Amm rel balance, without price")
+ax2 = ax1.twinx()
+ax2.plot(x, bal_0_1_tot_list, color="green", linewidth=2, label="Amm total usd, ref price")
+# ax2.plot(x, proc_tot_calc_list, color="cyan", linewidth=1)
+plt.grid(True, linestyle="--", alpha=0.5)
+fig.tight_layout()
+lines_1, labels_1 = ax1.get_legend_handles_labels()
+lines_2, labels_2 = ax2.get_legend_handles_labels()
+ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc="upper left", ncol=2, fontsize=10)
+plt.savefig('pictures/ammounts.png', dpi=200)
+plt.close()
 # ================================================================================================================
 
 
@@ -134,9 +173,10 @@ for pos in lasts:                                       # Range collection with 
     if pos.price is not None:
         price_aux = pos.price
 
+plt.style.use('dark_background')
 plt.figure(figsize=(18,12))
-plt.scatter(timestamps, prices_min, marker="o", color="black", s=60)
-plt.scatter(timestamps, prices_max, marker="o", color="black", s=60)
+plt.scatter(timestamps, prices_min, marker="o", color="white", s=60)
+plt.scatter(timestamps, prices_max, marker="o", color="white", s=60)
 plt.plot(timestamps, prices_emit, linestyle="-", color="teal", linewidth=3)
 plt.title("Ranges")
 plt.grid(True)
@@ -229,7 +269,7 @@ for pos in lasts:                               # Collect native balance losses 
         apr = proc_calc/dur_cur * 365                                                 # Annual percent rate
         # testpar = apr/(avrg_p/(pos.range_MAX - pos.range_MIN))                      # Test metric  
         print('Chng:', round(sum_total, 2), end=' ')
-        print('\tusd\t\tChng:', round(sum_total_alt, 6), end=' ')
+        print('\tusd\t\tChng:', round(sum_total_alt, 5), end=' ')
         print('\teth\t\tBal:', round(sum_amm, 2), end=' ')
         print('\tusd\t\tBal:', round(sum_amm_alt, 6), end=' ')
         print('\teth\t\tPrice:', round(pos.price, 2), end=' ')
