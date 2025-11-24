@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+import os
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
 import matplotlib.pyplot as plt
@@ -5,7 +7,19 @@ from datetime import datetime, timedelta
 import numpy as np
 import math
 
-discr = 2
+discr = 1
+gross_sma_prd = 30
+
+
+def make_avg(window_size):
+    values = []
+    def add(x):
+        values.append(x)
+        if len(values) > window_size:
+            values.pop(0)
+        return sum(values) / len(values)
+    return add
+
 
 def sma_calc(prev_sma, new_value, period):
     if prev_sma is None:
@@ -51,6 +65,8 @@ class Scan_window(Base):
 
 
 engine = create_engine("sqlite:///data/positions.db")
+load_dotenv("private/secrets.env")
+# engine = create_engine(os.getenv("SQL"))
 Session = sessionmaker(bind=engine)
 session = Session()
 
@@ -78,6 +94,7 @@ if stmt:
 
 lasts = (
     session.query(Scan_window)
+    .where(Scan_window.id > 0)          #2384)
     .order_by(Scan_window.id.asc())
     .all()
 )
@@ -115,8 +132,21 @@ liq_3_list = []
 gross_1_list = []
 gross_2_list = []
 gross_3_list = []
+sma_gross1 = None
+sma_gross2 = None
+sma_gross3 = None
 
-prev_price = lasts[0].price3
+
+
+
+gross1_avr = make_avg(60)
+gross2_avr = make_avg(60)
+gross3_avr = make_avg(60)
+# ================== Prepare new part
+
+
+
+prev_price = lasts[0].price2
 gross_0_prev = lasts[0].search_max * price_ref
 gross_1_prev = lasts[0].search_min
 aux_time = lasts[0].timestamp
@@ -180,20 +210,35 @@ d_sma_price = 0
 price_d_m = []
 sma_prices = []
 d_sma_prices = []
+prices_act_min = []
+prices_act_max = []
 
 for pos in lasts:
     # PUT directly, without calculations
     price_1_list.append(pos.price1)
     price_2_list.append(pos.price2)
     price_3_list.append(pos.price3)
+    prices_act_min.append(pos.actual_min)
+    prices_act_max.append(pos.actual_max)
     liq_1_list.append(pos.liq1)
     liq_2_list.append(pos.liq2)
     liq_3_list.append(pos.liq3)
-    gross_1_list.append(pos.gross1)
-    gross_2_list.append(pos.gross2)
-    gross_3_list.append(pos.gross3)
+    if pos.gross1 < 0 or pos.gross1 > 1e-14:
+        print('DEBUG:', pos.timestamp, 'D_grosses:, ', pos.gross1)
+        gross_1_list.append(gross1_avr(0))
+    else:
+        gross_1_list.append(gross1_avr(pos.gross1))
+    if pos.gross2 < 0 or pos.gross2 > 1e-14:
+        print('DEBUG:', pos.timestamp, 'D_grosses:, ', pos.gross2)
+        gross_2_list.append(gross2_avr(0))
+    else:
+        gross_2_list.append(gross2_avr(pos.gross2))
+    if pos.gross3 < 0 or pos.gross3 > 1e-14:
+        print('DEBUG:', pos.timestamp, 'D_grosses:, ', pos.gross3)
+        gross_3_list.append(gross3_avr(0))
+    else:
+        gross_3_list.append(gross3_avr(pos.gross3))
 
-    print(pos.gross2)
 
     # Volumes from fee gross changes
     if pos.search_max <= 0 or pos.search_min <= 0:
@@ -284,18 +329,23 @@ for pos in lasts:
 plt.style.use('dark_background')
 x = np.arange(len(lasts))
 fig, ax1 = plt.subplots(figsize=(18, 12))
-# ax1.plot(x, price_3_list, color="#CBDB389E", linewidth=1)
+ax1.plot(x, price_1_list, color="#CBDB389E", linewidth=1)
 ax1.plot(x, price_2_list, color="#E68E1C9E", linewidth=1)
-# ax1.plot(x, price_3_list, color="#E4E673B5", linewidth=1)
+ax1.plot(x, price_3_list, color="#E4E673B5", linewidth=1)
+ax1.plot(x, prices_act_min, color="magenta", linewidth=1)
+ax1.plot(x, prices_act_max, color="magenta", linewidth=1)
 # =================================================================================== SIMPLE INDICATORS
 # ax1.plot(x, IND_sma1_list, color="#FFFB23", linewidth=1)
 # ax1.plot(x, IND_sma3_list, color="#FFA500", linewidth=1)
 # =================================================================================== COMPLEX INDICATORS
 ax2 = ax1.twinx()
-# ax2.plot(x, gross_3_list, color="#70D3009E", linewidth=1)
-ax2.plot(x, gross_2_list, color="#00B6469D", linewidth=1)
-# ax2.plot(x, liq_3_list, color="#00BADB61", linewidth=1)
-# ax2.plot(x, gross_0_ind_list, color="#FFFFFF97", linewidth=1)
+ax2.plot(x, gross_1_list, color="#5DAF00AB", linewidth=1)
+ax2.plot(x, gross_2_list, color="#B600989D", linewidth=1)
+ax2.plot(x, gross_3_list, color="#003ADB89", linewidth=1)
+
+# ax2.plot(x, liq_1_list, color="#5DAF00AB", linewidth=1)
+# ax2.plot(x, liq_2_list, color="#B600989D", linewidth=1)
+# ax2.plot(x, liq_3_list, color="#003ADB89", linewidth=1)
 plt.grid(True, linestyle="--", alpha=0.5)
 fig.tight_layout()
 plt.savefig('pictures/window_lines_' + str(discr) + '.png', dpi=200)

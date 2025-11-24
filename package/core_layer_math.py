@@ -1,3 +1,4 @@
+from dotenv import load_dotenv
 import time
 import os
 import math
@@ -8,6 +9,7 @@ from sqlalchemy.ext.declarative import DeclarativeMeta
 from datetime import datetime
 import random
 import sys
+import numpy as np
 sys.stdout.reconfigure(encoding="utf-8")
 
 
@@ -73,22 +75,21 @@ class BotPos:
         self.params = self.load_config(self.descriptor)
         for key, value in self.params.items():
             setattr(self, key, value)
-        self.L_fee = 500
-        self.S_fee = 100
-        self.actuate()
+        self.amm0 = self.chain.get_balance_token(0)
+        self.amm1 = self.chain.get_balance_token(1)
+        self.native = self.chain.get_balance_native()
+        self.P_act_tick, self.P_act = self.chain.get_current_tick()
         self.P_min = self.P_max = self.P_act
         self.ScanWindow = make_scan_window_class(self.descriptor)
-        engine = create_engine("sqlite:///data/positions.db")
+        load_dotenv("private/secrets.env")
+        engine = create_engine(os.getenv("SQL"))
         Base.metadata.create_all(engine)
         Session = sessionmaker(bind=engine)
         self.session = Session()
         self.db_check()
-        _, Gr0_100, Gr1_100 = self.chain.get_liquidity(100)
-        _, Gr0_500, Gr1_500 = self.chain.get_liquidity(500)
-        _, Gr0_3000, Gr1_3000 = self.chain.get_liquidity(3000)
-        self.GrP_100 = Gr0_100 * self.P_act + Gr1_100
-        self.GrP_500 = Gr0_500 * self.P_act + Gr1_500
-        self.GrP_3000 = Gr0_3000 * self.P_act + Gr1_3000
+        _, self.Gr0P_100, self.Gr1P_100 = self.chain.get_liquidity(fee=100)
+        _, self.Gr0P_500, self.Gr1P_500 = self.chain.get_liquidity(fee=500)
+        _, self.Gr0P_3000, self.Gr1P_3000 = self.chain.get_liquidity(fee=3000)
         print('-'*25, '\nInit bot layer completed\n')
 
     def db_check(self):
@@ -139,7 +140,8 @@ class BotPos:
         print('New TEO range:', self.P_min, self.P_max, 'Width:', self.range_width, '\n')
 
     def proc_swap(self):
-        print('\n\n\n', '=' * 25, 'Swaping')
+        print('\n', '=' * 25, 'Swaping')
+        self.actuate_win_reg(swap=1)
         print('Current price:', self.P_act, 'Range:', self.P_min, self.P_max)
         print('Balances:', self.amm0, self.amm1)
         if self.mode == 'U' or self.mode == 'D' or self.mode == 'T':                                                # mode == 'UT' or mode == 'UF':
@@ -154,17 +156,17 @@ class BotPos:
                 print('Limit1:', self.amm1_limitation)
                 # self.chain.approve_token(self.amm1_limitation, 1, 'r', wait=1)
                 # self.chain.approve_token(0, 1, 'r', wait=1)
-                x, x0, x1 = self.chain.get_swap_ammount_router(self.amm0_get, self.amm1_limitation, 0, self.S_fee, by='Q')
+                x, x0, x1 = self.chain.get_swap_ammount_router(self.amm0_get, self.amm1_limitation, 0, by='Q')
             else:
                 self.amm1_limitation = -self.amm0_get * self.P_act * (1 - self.slippage)
                 print('Limit1:', self.amm1_limitation)
                 # self.chain.approve_token(-self.amm0_get, 0, 'r', wait=1)
                 # self.chain.approve_token(0, 0, 'r', wait=1)
-                x, x0, x1 = self.chain.get_swap_ammount_router(-self.amm0_get, self.amm1_limitation, 1, self.S_fee, by='I')
+                x, x0, x1 = self.chain.get_swap_ammount_router(-self.amm0_get, self.amm1_limitation, 1, by='I')
             # self.amm1 -= self.amm0_get * self.P_act
             # self.amm0 += self.amm0_get
             # am0new = k * am1 / (1 + k * p)
-        elif self.mode == 'TESTME':                                              # mode == 'DT' or mode == 'DF':
+        else:                                              # mode == 'DT' or mode == 'DF':
             self.amm0_teo_full = self.amm0 + self.amm1 / self.P_act
             self.k1 = BotPos.clc_amm(self.P_min, self.P_max, self.P_act, 1, 1)
             self.amm1_get_full = (self.k1 * self.amm0_teo_full * self.P_act) / (self.k1 + self.P_act)
@@ -176,13 +178,13 @@ class BotPos:
                 print('Limit0:', self.amm0_limitation)
                 # self.chain.approve_token(self.amm0_limitation, 0, 'r', wait=1)
                 # self.chain.approve_token(0, 0, 'r', wait=1)
-                x, x0, x1 = self.chain.get_swap_ammount_router(self.amm1_get, self.amm0_limitation, 1, self.S_fee, by='Q')
+                x, x0, x1 = self.chain.get_swap_ammount_router(self.amm1_get, self.amm0_limitation, 1, by='Q')
             else:
                 self.amm0_limitation = -self.amm1_get / self.P_act * (1 - self.slippage)
                 print('Limit0:', self.amm0_limitation)
                 # self.chain.approve_token(-self.amm1_get, 1, 'r', wait=1)
                 # self.chain.approve_token(0, 1, 'r', wait=1)
-                x, x0, x1 = self.chain.get_swap_ammount_router(-self.amm1_get, self.amm0_limitation, 0, self.S_fee, by='I')
+                x, x0, x1 = self.chain.get_swap_ammount_router(-self.amm1_get, self.amm0_limitation, 0, by='I')
             # self.amm0 -= self.amm1_get / self.P_act
             # self.amm1 += self.amm1_get  
             # am1new = (k * am0 * p) / (k + p)
@@ -196,50 +198,50 @@ class BotPos:
         return x
 
     def proc_open(self):
-        print('\n\n\n', '=' * 25, 'Opening')
+        print('\n', '=' * 25, 'Opening')
         print('Price prev:', self.P_act)
-        self.P_act_tick, self.P_act = self.chain.get_current_tick(self.L_fee)
+        self.P_act_tick, self.P_act = self.chain.get_current_tick()
         x00 = self.P_act
         print('\nTeo opening position assets:')
         x01 = self.amm0 = self.chain.get_balance_token(0)
         x02 = self.amm1 = self.chain.get_balance_token(1)
         print('='*25)
         if self.mode == 'U':                                                # mode == 'UT' or mode == 'UF':
-            print('Act:', self.P_act_tick, self.chain.price_from_tick(self.P_act_tick, self.L_fee))
-            self.P_min_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_min, self.L_fee), self.L_fee, direction='s')
-            print('Min:', self.P_min, self.P_min_tick, self.chain.price_from_tick(self.P_min_tick, self.L_fee))
-            self.bruto_max = BotPos.clc_rng(self.chain.price_from_tick(self.P_min_tick, self.L_fee), self.chain.price_from_tick(self.P_act_tick, self.L_fee), self.amm0, self.amm1)
+            print('Act:', self.P_act_tick, self.chain.price_from_tick(self.P_act_tick))
+            self.P_min_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_min), direction='s')
+            print('Min:', self.P_min, self.P_min_tick, self.chain.price_from_tick(self.P_min_tick))
+            self.bruto_max = BotPos.clc_rng(self.chain.price_from_tick(self.P_min_tick), self.chain.price_from_tick(self.P_act_tick), self.amm0, self.amm1)
             print('Recalc max:', self.bruto_max)
-            self.P_max_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.bruto_max, self.L_fee), self.L_fee, direction='s')
-            print('Max:', self.P_max_tick, self.chain.price_from_tick(self.P_max_tick, self.L_fee))
+            self.P_max_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.bruto_max), direction='s')
+            print('Max:', self.P_max_tick, self.chain.price_from_tick(self.P_max_tick))
             # self.amm1_lock = self.amm1
             # self.amm0_lock = BotPos.clc_amm(self.P_min, self.P_max, self.P_act, self.amm1_lock, 0)
             # self.L = self.amm1_lock / (math.sqrt(self.P_act) - math.sqrt(self.P_min))
             # self.L2 = self.amm0_lock / ((math.sqrt(self.P_max) - math.sqrt(self.P_act)) / (math.sqrt(self.P_max) * math.sqrt(self.P_act)))
         elif self.mode == 'D':                                              # mode == 'DT' or mode == 'DF':
-            print('Act:', self.P_act_tick, self.chain.price_from_tick(self.P_act_tick, self.L_fee))
-            self.P_max_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_max, self.L_fee), self.L_fee, direction='s')
-            print('Max:', self.P_max, self.P_max_tick, self.chain.price_from_tick(self.P_max_tick, self.L_fee))
-            self.bruto_min = BotPos.clc_rng(self.chain.price_from_tick(self.P_max_tick, self.L_fee), self.chain.price_from_tick(self.P_act_tick, self.L_fee), self.amm0, self.amm1)
+            print('Act:', self.P_act_tick, self.chain.price_from_tick(self.P_act_tick))
+            self.P_max_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_max), direction='s')
+            print('Max:', self.P_max, self.P_max_tick, self.chain.price_from_tick(self.P_max_tick))
+            self.bruto_min = BotPos.clc_rng(self.chain.price_from_tick(self.P_max_tick), self.chain.price_from_tick(self.P_act_tick), self.amm0, self.amm1)
             print('Recalc min:', self.bruto_min)
-            self.P_min_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.bruto_min, self.L_fee), self.L_fee, direction='s')
-            print('Min:', self.P_min_tick, self.chain.price_from_tick(self.P_min_tick, self.L_fee))
+            self.P_min_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.bruto_min), direction='s')
+            print('Min:', self.P_min_tick, self.chain.price_from_tick(self.P_min_tick))
             # self.amm0_lock = self.amm0
             # self.amm1_lock = BotPos.clc_amm(self.P_min, self.P_max, self.P_act, self.amm0_lock, 1)
             # self.L = self.amm1_lock / (math.sqrt(self.P_act) - math.sqrt(self.P_min))
             # self.L2 = self.amm0_lock / ((math.sqrt(self.P_max) - math.sqrt(self.P_act)) / (math.sqrt(self.P_max) * math.sqrt(self.P_act)))
         else:
-            print('Act:', self.P_act_tick, self.chain.price_from_tick(self.P_act_tick, self.L_fee))
-            self.P_min_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_min, self.L_fee), self.L_fee, direction='s')
-            print('Min:', self.P_min, self.P_min_tick, self.chain.price_from_tick(self.P_min_tick, self.L_fee))
-            self.P_max_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_max, self.L_fee), self.L_fee, direction='s')
-            print('Max:', self.P_max, self.P_max_tick, self.chain.price_from_tick(self.P_max_tick, self.L_fee))
+            print('Act:', self.P_act_tick, self.chain.price_from_tick(self.P_act_tick))
+            self.P_min_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_min), direction='s')
+            print('Min:', self.P_min, self.P_min_tick, self.chain.price_from_tick(self.P_min_tick))
+            self.P_max_tick = self.chain.tick_normalize(self.chain.tick_from_price(self.P_max), direction='s')
+            print('Max:', self.P_max, self.P_max_tick, self.chain.price_from_tick(self.P_max_tick))
         #==========================================================Approve dont needed==========================
         # self.chain.approve_token(self.amm0, 0, 'm', wait=1)
         # self.chain.approve_token(self.amm1, 1, 'm', wait=1)
         # self.chain.approve_token(0, 0, 'm', wait=1)
         # self.chain.approve_token(0, 1, 'm', wait=1)
-        x, x0, x1, self.id, self.L = self.chain.liq_add(self.P_min_tick, self.P_max_tick, self.amm0, self.amm1, self.L_fee, wait=1)
+        x, x0, x1, self.id, self.L = self.chain.liq_add(self.P_min_tick, self.P_max_tick, self.amm0, self.amm1, wait=1)
         print('Pos id:', self.id)
         print('Not used tokens:')
         if x == 1:
@@ -251,8 +253,8 @@ class BotPos:
             self.pos_data.token1_IN = x1
             self.pos_data.position = self.id
             self.pos_data.liq = self.L
-            self.pos_data.range_MIN = self.chain.price_from_tick(self.P_min_tick, self.L_fee)
-            self.pos_data.range_MAX = self.chain.price_from_tick(self.P_max_tick, self.L_fee)
+            self.pos_data.range_MIN = self.chain.price_from_tick(self.P_min_tick)
+            self.pos_data.range_MAX = self.chain.price_from_tick(self.P_max_tick)
             self.pos_data.step = self.step
             self.session.commit()
             # print teo min exit
@@ -262,7 +264,7 @@ class BotPos:
     def proc_close(self):
         if self.step == 2:
             time.sleep(1)
-            x, x0, x1 = self.chain.liq_remove(self.id, self.L_fee)
+            x, x0, x1 = self.chain.liq_remove(self.id)
             if x == 1:
                 self.step = 3
                 self.pos_data.token0_OUT = x0
@@ -273,7 +275,7 @@ class BotPos:
             return x
         if self.step == 3:
             time.sleep(1)
-            x, x0, x1 = self.chain.collect(self.id, self.L_fee)
+            x, x0, x1 = self.chain.collect(self.id)
             if x == 1:
                 self.step = 4
                 self.pos_data.timestamp_OUT = datetime.now()
@@ -316,22 +318,82 @@ class BotPos:
         if self.range_width < self.range_width_min:
             self.range_width = self.range_width_min
 
-    def actuate(self, show=1):
-        if show:
-            print('Refresh values...')
-        self.amm0 = self.chain.get_balance_token(0, show)
-        self.amm1 = self.chain.get_balance_token(1, show)
-        self.native = self.chain.get_balance_native(show)
-        self.P_act_tick, self.P_act = self.chain.get_current_tick(self.L_fee, show)
-        print('\n')
+    def actuate_win_slow(self):
+        print('Slow data parse...')
+        Liq100, Gr0_100, Gr1_100 = self.chain.get_liquidity(fee=100)
+        Liq500, Gr0_500, Gr1_500 = self.chain.get_liquidity(fee=500)
+        Liq3000, Gr0_3000, Gr1_3000 = self.chain.get_liquidity(fee=3000)
+        Gr0D_100 = Gr0_100 - self.Gr0P_100
+        Gr1D_100 = Gr1_100 - self.Gr1P_100
+        Gr0D_500 = Gr0_500 - self.Gr0P_500
+        Gr1D_500 = Gr1_500 - self.Gr1P_500
+        Gr0D_3000 = Gr0_3000 - self.Gr0P_3000
+        Gr1D_3000 = Gr1_3000 - self.Gr1P_3000
+        if self.chain.reversed:
+            GrDT_100 = Gr0D_100 + Gr1D_100 * self.P_act
+            GrDT_500 = Gr0D_500 + Gr1D_500 * self.P_act
+            GrDT_3000 = Gr0D_3000 + Gr1D_3000 * self.P_act
+        else:
+            GrDT_100 = Gr0D_100 * self.P_act + Gr1D_100
+            GrDT_500 = Gr0D_500 * self.P_act + Gr1D_500
+            GrDT_3000 = Gr0D_3000 * self.P_act + Gr1D_3000
+        self.Gr0P_100 = Gr0_100
+        self.Gr1P_100 = Gr1_100
+        self.Gr0P_500 = Gr0_500
+        self.Gr1P_500 = Gr1_500
+        self.Gr0P_3000 = Gr0_3000
+        self.Gr1P_3000 = Gr1_3000
+        new_pos = self.ScanWindow(
+            timestamp = datetime.now(),
+            liq1 = Liq100,
+            liq2 = Liq500,
+            liq3 = Liq3000,
+            gross1 = GrDT_100,
+            gross2 = GrDT_500,
+            gross3 = GrDT_3000,
+            actual_max = self.P_max,
+            actual_min = self.P_min,
+            search_max = self.P_act,
+            search_min = self.P_act
+        )
+        self.session.add(new_pos)
+        self.actuate_win_reg(all=1)
+        # Need to swich L pool from volumes
 
-    def actuate_win(self, show=1):
-        if show:
-            print(datetime.now(), end=' ')
-        _, P100 = self.chain.get_current_tick(100)
-        self.P_act_tick, self.P_act = self.chain.get_current_tick(500, show)
-        P500 = self.P_act
-        _, P3000 = self.chain.get_current_tick(3000)
+
+    def actuate_win_reg(self, all=0, swap=0):
+        if all or swap:
+            T100, P100 = self.chain.get_current_tick(fee=100)
+            T500, P500 = self.chain.get_current_tick(fee=500)
+            T3000, P3000 = self.chain.get_current_tick(fee=3000)
+            if self.chain.L_fee == 100:
+                self.P_act_tick, self.P_act = T100, P100            
+            elif self.chain.L_fee == 500:
+                self.P_act_tick, self.P_act = T500, P500
+            elif self.chain.L_fee == 3000:
+                self.P_act_tick, self.P_act = T3000, P3000
+            if swap:
+                print('Search best price for swap...')
+                # Need to swich S pool for best swap
+        else:
+            if self.chain.L_fee == 100:
+                T100, P100 = self.chain.get_current_tick(fee=100)
+                T500 = P500 = np.nan
+                T3000 = P3000 = np.nan
+                self.P_act_tick, self.P_act = T100, P100
+            elif self.chain.L_fee == 500:
+                T100, P100 = np.nan
+                T500 = P500 = self.chain.get_current_tick(fee=500)
+                T3000 = P3000 = np.nan
+                self.P_act_tick, self.P_act = T500, P500
+            elif self.chain.L_fee == 3000:
+                T100, P100 = np.nan
+                T500 = P500 = np.nan
+                T3000 = P3000 = self.chain.get_current_tick(fee=3000)
+                self.P_act_tick, self.P_act = T3000, P3000
+
+        # animation (price level in range area)
+        print(datetime.now(), end=' ')
         rng = self.P_max - self.P_min
         if rng <= 0:
             z1 = z2 = 15
@@ -339,33 +401,13 @@ class BotPos:
             z1 = int(30 * (self.P_act - self.P_min) / (self.P_max - self.P_min))
             z1 = max(0, min(z1, 30))
             z2 = 30 - z1
-        if show:
-            print('\t|', '.' * z1, '|', '.' * z2, '|', sep='')
+        print('\t|', '.' * z1, '|', '.' * z2, '|', sep='')
         
-        Liq100, Gr0_100, Gr1_100 = self.chain.get_liquidity(100)
-        Liq500, Gr0_500, Gr1_500 = self.chain.get_liquidity(500)
-        Liq3000, Gr0_3000, Gr1_3000 = self.chain.get_liquidity(3000)
-        GrT_100 = Gr0_100 * self.P_act + Gr1_100
-        GrT_500 = Gr0_500 * self.P_act + Gr1_500
-        GrT_3000 = Gr0_3000 * self.P_act + Gr1_3000
-        GrD_100 = GrT_100 - self.GrP_100
-        GrD_500 = GrT_500 - self.GrP_500
-        GrD_3000 = GrT_3000 - self.GrP_3000
-        self.GrP_100 = GrT_100
-        self.GrP_500 = GrT_500
-        self.GrP_3000 = GrT_3000
-
         new_pos = self.ScanWindow(
             timestamp = datetime.now(),
             price1 = P100,
             price2 = P500,
             price3 = P3000,
-            liq1 = Liq100,
-            liq2 = Liq500,
-            liq3 = Liq3000,
-            gross1 = GrD_100,
-            gross2 = GrD_500,
-            gross3 = GrD_3000,
             actual_max = self.P_max,
             actual_min = self.P_min,
             search_max = self.P_act,

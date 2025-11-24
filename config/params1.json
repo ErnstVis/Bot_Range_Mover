@@ -1,0 +1,18 @@
+{
+    "range_scale_stable": 0.8,
+    "range_scale_fluctuate": 1.25,
+    "range_move_trend": 0.35,
+    "range_move_float": 0.15,
+    "range_width_max": 894,
+    "range_width_min": 293,
+    "range_width": 293.0,
+    "dyn_period_max": 36,
+    "dyn_period_min": 18,
+    "prev_mode": "T",
+    "mode": "T",
+    "slippage": 0.03,
+    "L_fee": 500,
+    "S_fee": 100,
+    "teo_max": 2.985789569233123e-15,
+    "teo_min": 6.076297554308911e-12
+}

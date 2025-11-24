@@ -48,6 +48,7 @@ def main():
     pos = BotPos(desc, 0, chain)
 
     # =========================== ROUTINE ================================
+    count = 0
     while True:
         # JOB PROCESSING OR JUST DATA COLLECTION
         if trade_on:
@@ -63,7 +64,11 @@ def main():
                     time.sleep(30)
                     continue
             elif pos.step == 2:                     # Opened
-                pos.actuate_win()
+                if count >= 60:
+                    pos.actuate_win_slow()
+                    count = 0
+                else:
+                    pos.actuate_win_reg()
                 if pos.P_act > pos.P_max:
                     if pos.proc_close() != 1:
                         print('\nSTATUS NOT 1...')
@@ -112,10 +117,14 @@ def main():
                 pos.params["range_width"] = pos.range_width
                 pos.save_config(pos.params, desc)
                 pos.step = 0
-
         else:
-            pos.actuate_win()
+            if count >= 60:
+                pos.actuate_win_slow()
+                count = 0
+            else:
+                pos.actuate_win_reg()
             time.sleep(60)
+        count += 1
 
 if __name__ == "__main__":
     main()

@@ -1,7 +1,10 @@
 .venv/
+.venv311/
 private/
 data/
 pictures/
 logs/
 trash/
 archive/
+.env
+*.env
