@@ -2,14 +2,43 @@ from package import BotPos, ChainLink
 import math
 import time
 from datetime import datetime, timedelta
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
+from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.ext.declarative import DeclarativeMeta
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="eth_utils")
 
 
-chain = ChainLink('arbitrum', 'weth', 'usdc', 'uniswap', 'test')
-pos = BotPos(1, 0, chain)
+chain = ChainLink('polygon', 'weth', 'usdt', 'uniswap', 'test')
+pos = BotPos(2, 0, chain)
 
-print(pos.chain.get_liquidity())
+Base: DeclarativeMeta = declarative_base()
+class Positions(Base):
+    __tablename__ = "positions"
+    id = Column(Integer, primary_key=True)
+    descriptor = Column(Integer)
+    position = Column(Integer)
+    range_MIN = Column(Float)
+    range_MAX = Column(Float)
+    timestamp_IN = Column(DateTime)
+    timestamp_OUT = Column(DateTime)
+    token0_IN = Column(Float)
+    token1_IN = Column(Float)
+    token0_OUT = Column(Float)
+    token1_OUT = Column(Float)
+    token0_fee = Column(Float)
+    token1_fee = Column(Float)
+    token0_swap = Column(Float)
+    token1_swap = Column(Float)
+    balance_0 = Column(Float)
+    balance_1 = Column(Float)
+    native = Column(Float)
+    price = Column(Float)
+    liq = Column(Float)
+    step = Column(Integer)
+
+
+# print(pos.chain.get_liquidity())
 
 
 # pos.range_width = 180
@@ -76,31 +105,46 @@ print(pos.chain.get_liquidity())
 #     j -= 360
 
 
-# pos.chain.approve_token(0, 0, 'r', wait=1)
-# pos.chain.approve_token(0, 1, 'r', wait=1)
-# pos.chain.approve_token(0, 0, 'm', wait=1)
-# pos.chain.approve_token(0, 1, 'm', wait=1)
+
+
+# ============================================================== APROVE ALL
+'''
+pos.chain.approve_token(0, 0, 'r', wait=1)
+pos.chain.approve_token(0, 1, 'r', wait=1)
+pos.chain.approve_token(0, 0, 'm', wait=1)
+pos.chain.approve_token(0, 1, 'm', wait=1)
+
+'''
 
 
 
+# ============================================================== POS ACTIONS
+'''
+pos_id = 2797759
+position = pos.chain.contract_manager.functions.positions(pos_id).call()
 
-# position = pos.chain.contract_manager.functions.positions(pos.id).call()
+nonce         = position[0]
+operator      = position[1]
+token0        = position[2] 
+token1        = position[3]
+fee           = position[4]
+tick_lower    = position[5]
+tick_upper    = position[6]
+liquidity     = position[7]
+feeGrowth0    = position[8]
+feeGrowth1    = position[9]
+tokensOwed0   = position[10]
+tokensOwed1   = position[11]
 
-# nonce         = position[0]
-# operator      = position[1]
-# token0        = position[2] 
-# token1        = position[3]
-# fee           = position[4]
-# tick_lower    = position[5]
-# tick_upper    = position[6]
-# liquidity     = position[7]
-# feeGrowth0    = position[8]
-# feeGrowth1    = position[9]
-# tokensOwed0   = position[10]
-# tokensOwed1   = position[11]
+print("Liquidity:", liquidity)
+print("Range:", tick_lower, tick_upper)
 
-# print("Liquidity:", liquidity)
-# print("Range:", tick_lower, tick_upper)
+pos.chain.liq_remove(pos_id)
+pos.chain.collect(pos_id)
+
+# pos.pos_data.step = 0
+# pos.session.commit()
+'''
 
 
 # P_min = pos.chain.price_from_tick(tick_lower)
@@ -118,9 +162,31 @@ print(pos.chain.get_liquidity())
 
 
 
+# ============================================================== DATABASE VIEW
+'''
+# pos.pos_data.step = 0
+# pos.session.commit()
 
-# pos.step = 2
-# pos.id = 4921445
+rows = (
+    pos.session.query(Positions)
+    .order_by(Positions.id.desc())
+    .limit(1000)
+    .all()
+)
+
+for r in rows:
+    print(r.id, r.step, r.position, r.timestamp_IN, r.descriptor)
+'''
+
+
+
+
+
+
+
+
+# pos.step = 0
+# pos.id = 2797759
 # pos.proc_close()
 
 

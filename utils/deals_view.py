@@ -45,10 +45,18 @@ engine = create_engine("sqlite:///data/positions.db")
 Session = sessionmaker(bind=engine)
 session = Session()
 
+
+descriptor = 2
+if descriptor == 1:
+    start_id = 58           # d1-58, d2-54
+elif descriptor == 2:
+    start_id = 54
+
+
 lasts = (
     session.query(Position)
-    .filter(Position.descriptor == 1)
-    .filter(Position.id >= 17)
+    .filter(Position.descriptor == descriptor)
+    .filter(Position.id >= start_id)
     .order_by(Position.id.desc())
     .limit(20)
     .all()

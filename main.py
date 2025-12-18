@@ -26,14 +26,21 @@ def main():
         tok1 = 'usdc'
         proto = 'uniswap'
         desc = 1
-        print('Running in arb_uni3_eth mode... Descriptor 1')
+        print('Running in arbitrum chain, uni3 proto, eth usdc... Descriptor 1')
     elif args.mode == 'pol_uni3_eth':
         ch = 'polygon'
         tok0 = 'weth'
         tok1 = 'usdt'
         proto = 'uniswap'
         desc = 2
-        print('Running in pol_uni3_eth mode... Descriptor 2')
+        print('Running in polygon chain, uni3 proto, weth usdt... Descriptor 2')
+    elif args.mode == 'pol_uni3_mai':
+        ch = 'polygon'
+        tok0 = 'frax'
+        tok1 = 'mai'
+        proto = 'uniswap'
+        desc = 3
+        print('Running in polygon chain, uni3 proto, eth sol... Descriptor 3')
     else:
         print('Unknown mode arg...')
         return
@@ -64,7 +71,7 @@ def main():
                     time.sleep(30)
                     continue
             elif pos.step == 2:                     # Opened
-                if count >= 60:
+                if count >= 120:
                     pos.actuate_win_slow()
                     count = 0
                 else:
@@ -74,7 +81,8 @@ def main():
                         print('\nSTATUS NOT 1...')
                         time.sleep(30)
                         continue
-                    pos.prev_mode = pos.mode
+                    if pos.mode != 'T':
+                        pos.prev_mode = pos.mode
                     pos.mode = 'U'
                     pos.params = pos.load_config(desc)
                     pos.params["prev_mode"] = pos.prev_mode
@@ -86,19 +94,26 @@ def main():
                         print('\nSTATUS NOT 1...')
                         time.sleep(30)
                         continue
-                    pos.prev_mode = pos.mode
+                    if pos.mode != 'T':
+                        pos.prev_mode = pos.mode
                     pos.mode = 'D'
                     pos.params = pos.load_config(desc)
                     pos.params["prev_mode"] = pos.prev_mode
                     pos.params["mode"] = pos.mode
                     pos.save_config(pos.params, desc)
                     continue
-                elif pos.pos_data.timestamp_IN and datetime.now() - pos.pos_data.timestamp_IN > timedelta(hours=pos.dyn_period_scale()) and pos.test_min_width():
+                elif (
+                    pos.pos_data.timestamp_IN                       # if opened 
+                    and datetime.now() - pos.pos_data.timestamp_IN
+                    > timedelta(hours=pos.dyn_period_scale())       # if time to reopen
+                    and pos.test_range_mod()                        # if logic allows
+                ):
                     if pos.proc_close() != 1:
                         print('\nSTATUS NOT 1...')
                         time.sleep(30)
                         continue
-                    pos.prev_mode = pos.mode
+                    if pos.mode != 'T':
+                        pos.prev_mode = pos.mode
                     pos.mode = 'T'
                     pos.params = pos.load_config(desc)
                     pos.params["prev_mode"] = pos.prev_mode
@@ -115,10 +130,12 @@ def main():
                 pos.proc_modify()
                 pos.params = pos.load_config(desc)
                 pos.params["range_width"] = pos.range_width
+                pos.params["L_fee"] = pos.L_fee
                 pos.save_config(pos.params, desc)
+                pos.chain.L_fee = pos.L_fee         # Put best pool of last hour to new position
                 pos.step = 0
         else:
-            if count >= 60:
+            if count >= 120:
                 pos.actuate_win_slow()
                 count = 0
             else:
