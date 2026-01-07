@@ -71,7 +71,7 @@ def main():
                     time.sleep(30)
                     continue
             elif pos.step == 2:                     # Opened
-                if count >= 120:
+                if count >= 60:
                     pos.actuate_win_slow()
                     count = 0
                 else:
@@ -103,8 +103,8 @@ def main():
                     pos.save_config(pos.params, desc)
                     continue
                 elif (
-                    pos.pos_data.timestamp_IN                       # if opened 
-                    and datetime.now() - pos.pos_data.timestamp_IN
+                    pos.timestamp_IN                       # if opened 
+                    and datetime.now() - pos.timestamp_IN
                     > timedelta(hours=pos.dyn_period_scale())       # if time to reopen
                     and pos.test_range_mod()                        # if logic allows
                 ):
@@ -135,7 +135,7 @@ def main():
                 pos.chain.L_fee = pos.L_fee         # Put best pool of last hour to new position
                 pos.step = 0
         else:
-            if count >= 120:
+            if count >= 60:
                 pos.actuate_win_slow()
                 count = 0
             else:

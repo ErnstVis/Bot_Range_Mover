@@ -4,7 +4,8 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 import numpy as np
 import math
-
+from dotenv import load_dotenv
+import os
 
 def clc_amm(P_min, P_max, ammount_in, target):
     if target:
@@ -41,17 +42,25 @@ class Position(Base):
     liq = Column(Float)
     step = Column(Integer)
 
-engine = create_engine("sqlite:///data/positions.db")
+
+load_dotenv("private/secrets.env")
+engine = create_engine(os.getenv("SQL"))
 Session = sessionmaker(bind=engine)
 session = Session()
+
+# engine = create_engine("sqlite:///data/positions.db")
+# Session = sessionmaker(bind=engine)
+# session = Session()
 
 
 descriptor = 2
 if descriptor == 1:
-    start_id = 58           # d1-58, d2-54
+    start_id = 49           # d1-58, d2-55
 elif descriptor == 2:
-    start_id = 54
+    start_id = 55
 
+row = session.query(Position).order_by(Position.id.desc()).first()
+print(row.id, row.descriptor, row.timestamp_IN)
 
 lasts = (
     session.query(Position)
@@ -78,8 +87,16 @@ proc_tot_calc_list = []
 teo_balance_list = []
 sum_total_0 = 0
 sum_total_1 = 0
-sum_fee_0 = 0
-sum_fee_1 = 0
+
+cmltv_fee_0 = 0
+cmltv_fee_1 = 0
+cmltv_swap_0 = 0
+cmltv_swap_1 = 0
+cmltv_pool_0 = 0
+cmltv_pool_1 = 0
+
+
+# print([pos.balance_0 for pos in lasts[:-1]])
 bal_0_max = max(pos.balance_0 for pos in lasts[:-1])
 bal_1_max = max(pos.balance_1 for pos in lasts[:-1])
 
@@ -96,13 +113,23 @@ for row in lasts[:-1]:                                                          
     print(round(row.balance_0 * row.price + row.balance_1, 2))
     sum_total_0 += sum_0
     sum_total_1 += sum_1
-    sum_fee_0 += row.token0_fee
-    sum_fee_1 += row.token1_fee
+    sum_0_1_tot = sum_total_0 * row.price + sum_total_1
+
+    cmltv_fee_0 += row.token0_fee
+    cmltv_fee_1 += row.token1_fee
+    cmltv_swap_0 += -row.token0_swap
+    cmltv_swap_1 += -row.token1_swap
+    cmltv_pool_0 += -row.token0_IN + row.token0_OUT
+    cmltv_pool_1 += -row.token1_IN + row.token1_OUT
+
+    sum_0_1_fee = cmltv_fee_0 * row.price + cmltv_fee_1
+    sum_0_1_pool = cmltv_pool_0 * row.price + cmltv_pool_1
+    sum_0_1_swap = cmltv_swap_0 * row.price + cmltv_swap_1
+    sum_0_1_tot_new = sum_0_1_pool + sum_0_1_fee + sum_0_1_swap
+
     course = -sum_1/sum_0
     dur_tot_d = (row.timestamp_OUT - start_time_ref).total_seconds() / 3600 / 24
     dur_tot_y = dur_tot_d / 365
-    sum_0_1_tot = sum_total_0 * row.price + sum_total_1
-    sum_0_1_fee = sum_fee_0 * row.price + sum_fee_1
     bal_0_1_tot = row.balance_0 * price_ref + row.balance_1
     proc_tot_calc = sum_0_1_tot / (bal_0_1_tot - sum_0_1_tot) * 100
     apr_tot_usd = proc_tot_calc/dur_tot_y
@@ -144,6 +171,11 @@ print('\tK:', round(-sum_total_1/sum_total_0, 2), '\t\t\tSum:', round(sum_0_1_to
 print('\tSum:', round(sum_total_1 / price_ref + sum_total_0, 6), '\teth', end='\t')
 print('\tChng:', round(proc_tot_calc, 2), '\t%', end='\t')
 print('\tAPR:', round(apr_tot_usd, 2), '\t%')
+
+print('\nCmltv Fees:\t', round(cmltv_fee_1, 2), '\tusd\t', round(cmltv_fee_0, 6), '\teth', end='\t')
+print('\tCmltv Swap:\t', round(cmltv_swap_1, 2), '\tusd\t', round(cmltv_swap_0, 6), '\teth', end='\t')
+print('\tCmltv Pool:\t', round(cmltv_pool_1, 2), '\tusd\t', round(cmltv_pool_0, 6), '\teth')
+print(sum_0_1_fee, '\t'*6, sum_0_1_swap, '\t'*6, sum_0_1_pool, '\t'*6, sum_0_1_tot_new)
 print('='*220+'\n')
 
 

@@ -119,8 +119,8 @@ pos.chain.approve_token(0, 1, 'm', wait=1)
 
 
 # ============================================================== POS ACTIONS
-'''
-pos_id = 2797759
+# '''
+pos_id = 2804212
 position = pos.chain.contract_manager.functions.positions(pos_id).call()
 
 nonce         = position[0]
@@ -137,14 +137,23 @@ tokensOwed0   = position[10]
 tokensOwed1   = position[11]
 
 print("Liquidity:", liquidity)
-print("Range:", tick_lower, tick_upper)
+# print("Range:", tick_lower, tick_upper)
 
-pos.chain.liq_remove(pos_id)
-pos.chain.collect(pos_id)
+address_pool = '0x4CcD010148379ea531D6C587CfDd60180196F9b1'
+x0 = chain.get_balance_token(0, addr=address_pool)
+x1 = chain.get_balance_token(1, addr=address_pool)
+print("Balances:", x0, x1)
 
-# pos.pos_data.step = 0
-# pos.session.commit()
-'''
+_, x2 = chain.get_current_tick(fee=3000)
+print("Current tick:", x2)
+
+
+# pos.chain.liq_remove(pos_id)
+# pos.chain.collect(pos_id)
+
+# # pos.pos_data.step = 0
+# # pos.session.commit()
+# '''
 
 
 # P_min = pos.chain.price_from_tick(tick_lower)

@@ -44,7 +44,7 @@ def dyn_period_scale(min, max):
 
 
 
-discr = [2]              # refresh needed pairs
+discr = [1, 2]              # refresh needed pairs
 gross_sma_prd = 30
 fees = [100, 500, 3000, 10000]
 
@@ -98,20 +98,29 @@ for val in discr:
         start_tok0 = stmt.search_max
         start_tok1 = stmt.search_min
     '''
+    if val == 2:
+        starts_days_ago = 11         # 1 - 28.12.2025; 2 - 17.12.2025
+    else:
+        starts_days_ago = 100
+
 
     lasts_fast = (
         session.query(Scan_fast)
-        .where(Scan_fast.id > 0)
+        .where(Scan_fast.timestamp >= (datetime.now() - timedelta(days=starts_days_ago)))
         .order_by(Scan_fast.id.asc())
         .all())
-    
-    lasts_slow = (
+    lasts_slow_1 = (
         session.query(Scan_slow)
-        .where(Scan_slow.id > 0)
+        .where(Scan_slow.timestamp >= (datetime.now() - timedelta(days=starts_days_ago)))
+        .where(Scan_slow.fee == 500)
+        .order_by(Scan_slow.id.asc())
+        .all())
+    lasts_slow_2 = (
+        session.query(Scan_slow)
+        .where(Scan_slow.timestamp >= (datetime.now() - timedelta(days=starts_days_ago)))
         .where(Scan_slow.fee == 3000)
         .order_by(Scan_slow.id.asc())
         .all())
-
     # print()
     # print(lasts_fast[-1].actual_min)
     # print(lasts_fast[-1].actual_max)
@@ -201,8 +210,8 @@ for val in discr:
         timestamp_list_fast.append(pos.timestamp)
         price_dex_list.append(pos.price_dex)
         # print('DEBUG:', pos.timestamp, 'Price DEX:, ', pos.price_dex)
-        # prices_act_min_list.append(pos.actual_min)
-        # prices_act_max_list.append(pos.actual_max)
+        prices_act_min_list.append(pos.actual_min)
+        prices_act_max_list.append(pos.actual_max)
         # liq_4_list.append(pos.liq4)
         # if pos.gross1 < 0 or pos.gross1 > 1e-14:
         #     print('DEBUG:', pos.timestamp, 'D_grosses:, ', pos.gross1)
@@ -253,33 +262,38 @@ for val in discr:
         # IND_sma1_prev = IND_sma1
         # IND_sma3_prev = IND_sma3
     
-    timestamp_list_slow = []
-    gross_list = []
-    liq_list = []
-    for pos in lasts_slow:
-        timestamp_list_slow.append(pos.timestamp)
-        gross_list.append(pos.gross)
-        liq_list.append(pos.liq)
-
+    timestamp_list_1_slow = []
+    gross_list_1 = []
+    liq_list_1 = []
+    for pos in lasts_slow_1:
+        timestamp_list_1_slow.append(pos.timestamp)
+        gross_list_1.append(pos.gross)
+        liq_list_1.append(pos.liq)
+    timestamp_list_2_slow = []
+    gross_list_2 = []
+    liq_list_2 = []
+    for pos in lasts_slow_2:
+        timestamp_list_2_slow.append(pos.timestamp)
+        gross_list_2.append(pos.gross)
+        liq_list_2.append(pos.liq)
 
     # ============================================================= PLOTTING
     plt.style.use('dark_background')
     # x = np.arange(len(lasts))
     fig, ax1 = plt.subplots(figsize=(18, 12))
-    ax1.plot(timestamp_list_fast, price_dex_list, color="#FF008CFF", linewidth=1)
+    ax1.plot(timestamp_list_fast, price_dex_list, color="#DF4E9EFF", linewidth=1)
     # ax1.plot(timestamp_list, price_2_list, color="#77E61C9E", linewidth=1)
     # ax1.plot(timestamp_list, price_3_list, color="#E4E673B5", linewidth=1)
     # ax1.plot(timestamp_list, price_4_list, color="#DB965DB5", linewidth=1)
-    # ax1.plot(timestamp_list, prices_act_min_list, color="magenta", linewidth=1)
-    # ax1.plot(timestamp_list, prices_act_max_list, color="magenta", linewidth=1)
+    ax1.plot(timestamp_list_fast, prices_act_min_list, color="magenta", linewidth=1)
+    ax1.plot(timestamp_list_fast, prices_act_max_list, color="magenta", linewidth=1)
     # ============================================================= SIMPLE INDICATORS
     # ax1.plot(x, IND_sma1_list, color="#FFFB23", linewidth=1)
     # ax1.plot(x, IND_sma3_list, color="#FFA500", linewidth=1)
     # ============================================================= COMPLEX INDICATORS
     ax2 = ax1.twinx()
-    ax2.plot(timestamp_list_slow, gross_list, color="#88FF00FF", linewidth=1)
-    # ax2.plot(timestamp_list, gross_3_list, color="#0083DB9B", linewidth=1)
-    # ax2.plot(timestamp_list, gross_4_list, color="#003ADB89", linewidth=1)
+    ax2.plot(timestamp_list_1_slow, gross_list_1, color="#95D44CFF", linewidth=1)
+    ax2.plot(timestamp_list_2_slow, gross_list_2, color="#688F3BFF", linewidth=1)
 
     # ax2.plot(x, liq_1_list, color="#5DAF00AB", linewidth=1)
     # ax2.plot(x, liq_2_list, color="#B600989D", linewidth=1)
@@ -287,7 +301,8 @@ for val in discr:
     ax3 = ax1.twinx()
     # ax3.get_yaxis().set_visible(False)
     ax3.tick_params(labelleft=False, labelright=False)
-    ax3.plot(timestamp_list_slow, liq_list, color="#0066FFFF", linewidth=1)
+    ax3.plot(timestamp_list_1_slow, liq_list_1, color="#58C3D1FF", linewidth=1)
+    ax3.plot(timestamp_list_2_slow, liq_list_2, color="#4787E9FF", linewidth=1)
 
 
     plt.grid(True, linestyle="--", alpha=0.5)

@@ -20,7 +20,7 @@ class ChainLink:
             self.gas_limit = 0.15
         elif blockchain == 'polygon':
             path = 'config/addresses/polygon.json'
-            self.gas_limit = 70
+            self.gas_limit = 10000
         elif blockchain == 'optimism':
             path = 'config/addresses/optimism.json'
         with open(path, 'r') as f:
@@ -103,8 +103,7 @@ class ChainLink:
                 "reversed": reversed
             }
             print('Pool', address, 'added:', fee, 'Spacing/reversed:', tick_spacing, reversed)
-        self.L_fee = 3000  
-        self.G_fee = 3000
+        self.L_fee = 3000
         self.S_fee = 3000
         print('-'*25, '\nInit chain layer completed\n')
 
@@ -306,7 +305,7 @@ class ChainLink:
 
     def get_current_tick(self, fee=None, retries=5, delay=5):
         if fee is None:
-            fee = self.G_fee
+            fee = self.L_fee
         pool = self.pools.get(fee)
         if pool is None:
             return None
@@ -333,7 +332,7 @@ class ChainLink:
 
     def get_liquidity(self, tick=None, fee=None, retries=5, delay=5):
         if fee is None:
-            fee = self.G_fee
+            fee = self.L_fee
         pool = self.pools.get(fee)
         if pool is None:
             return None
@@ -548,7 +547,7 @@ class ChainLink:
         }
         transaction = self.contract_manager.functions.decreaseLiquidity(params).build_transaction({
         "from": self.address_wallet,
-        "gas": 300000,
+        "gas": 310000,
         "gasPrice": int(gas_price * 1.05),
         "nonce": nonce,
         "chainId": self.chain_id,
@@ -586,7 +585,7 @@ class ChainLink:
         }
         transaction = self.contract_manager.functions.collect(params).build_transaction({
         "from": self.address_wallet,
-        "gas": 300000,
+        "gas": 310000,
         "gasPrice": int(gas_price * 1.05),
         "nonce": nonce,
         "chainId": self.chain_id,
@@ -617,7 +616,7 @@ class ChainLink:
         nonce, gas_price = self.pre_transaction(gas_price_limit_gwei=self.gas_limit)
         transaction = self.contract_manager.functions.burn(token_id).build_transaction({
             "from": self.address_wallet,
-            "gas": 200000,
+            "gas": 210000,
             "gasPrice": int(gas_price * 1.05),
             "nonce": nonce,
             "chainId": self.chain_id,
@@ -638,7 +637,7 @@ class ChainLink:
         try:
             signed_transaction = self.connection.eth.account.sign_transaction(transaction, self.key_wallet)
             transaction_hash = self.connection.eth.send_raw_transaction(signed_transaction.raw_transaction)
-            print(f"Hash: {self.connection.to_hex(transaction_hash)}", end=' ')
+            print(f"Hash: {self.connection.to_hex(transaction_hash)}")
             if wait:
                 try:
                     # print("Waiting for transaction receipt...")

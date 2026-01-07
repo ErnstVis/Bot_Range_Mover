@@ -101,10 +101,17 @@ class BotPos:
         self.P_max = self.P_act + self.range_width / 2
         self.ScanFast, self.ScanSlow = make_scan_class(self.descriptor)
         load_dotenv("private/secrets.env")
-        engine = create_engine(os.getenv("SQL"))
+
+        engine = create_engine(os.getenv("SQL"), pool_pre_ping=True, pool_recycle=1800)
         Base.metadata.create_all(engine)
         Session = sessionmaker(bind=engine)
-        self.session = Session()
+        self.Session = Session
+
+        # engine = create_engine(os.getenv("SQL"))
+        # Base.metadata.create_all(engine)
+        # Session = sessionmaker(bind=engine)
+        # self.session = Session()
+
         self.db_check()
         self.L_fee = self.chain.L_fee
         for fee, pool in self.chain.pools.items():
@@ -113,32 +120,96 @@ class BotPos:
                 pool["liquidity"], pool["gross0"], pool["gross1"] = res
         print('-'*25, '\nInit bot layer completed\n')
 
+
+
     def db_check(self):
-        self.pos_data = self.session.query(Positions).filter(Positions.descriptor == self.descriptor).order_by(Positions.id.desc()).first()
-        print(self.pos_data.id, self.pos_data.step, self.pos_data.position, self.pos_data.timestamp_IN, self.pos_data.descriptor)
-        if self.pos_data is None:
-            print('Debug: first line with current descriptor')
-            self.db_add()
-        if self.pos_data.step == 5 or self.pos_data.step == 0:
-            print('Debug: step 0 or 5 detected, creating new DB entry')
-            self.db_add()
-        elif self.pos_data.step != 1:
-            self.id = self.pos_data.position
-            self.P_max = self.pos_data.range_MAX
-            self.P_min = self.pos_data.range_MIN
-            print('Last position ID:', self.id)
-        else:
-            self.pos_data.step = 0
-            print('Debug: incompleted position detected, setting step to 0')
-        self.step = self.pos_data.step
-        print('Complecting of last position:', self.step, 'desc:', self.descriptor)
+        with self.Session() as session:
+            pos = (
+                session.query(Positions)
+                .filter(Positions.descriptor == self.descriptor)
+                .order_by(Positions.id.desc())
+                .first()
+            )
+            if pos is None or pos.step in (0, 5):
+                pos = Positions(descriptor=self.descriptor, step=0)
+                session.add(pos)
+                session.commit()
+                session.refresh(pos)   # ← получаем id
+                print('Added')
+            elif pos.step != 1:
+                self.id = pos.position
+                self.P_max = pos.range_MAX
+                self.P_min = pos.range_MIN
+                print('Last position ID:', self.id)
+            else:
+                print('Debug: incompleted position detected, setting step to 0')
+                pos.step = 0
+                session.commit()
+            self.db_pos_id = pos.id
+            self.step = pos.step
+            self.timestamp_IN = pos.timestamp_IN
+            print(
+                'Complecting of last position:',
+                self.step,
+                'desc:',
+                self.descriptor
+            )
+
+
+    # def db_check(self):
+    #     session = self.Session()
+    #     try:
+    #         self.pos_data = (
+    #             session.query(Positions)
+    #             .filter(Positions.descriptor == self.descriptor)
+    #             .order_by(Positions.id.desc())
+    #             .first()
+    #         )
+    #     finally:
+    #         session.close()
+    #     # self.pos_data = self.session.query(Positions).filter(Positions.descriptor == self.descriptor).order_by(Positions.id.desc()).first()
+    #     print(self.pos_data.id, self.pos_data.step, self.pos_data.position, self.pos_data.timestamp_IN, self.pos_data.descriptor)
+    #     if self.pos_data is None:
+    #         print('Debug: first line with current descriptor')
+    #         self.db_add()
+    #     if self.pos_data.step == 5 or self.pos_data.step == 0:
+    #         print('Debug: step 0 or 5 detected, creating new DB entry')
+    #         self.db_add()
+    #     elif self.pos_data.step != 1:
+    #         self.id = self.pos_data.position
+    #         self.P_max = self.pos_data.range_MAX
+    #         self.P_min = self.pos_data.range_MIN
+    #         print('Last position ID:', self.id)
+    #     else:
+    #         self.pos_data.step = 0
+    #         print('Debug: incompleted position detected, setting step to 0')
+    #     self.step = self.pos_data.step
+    #     print('Complecting of last position:', self.step, 'desc:', self.descriptor)
     
-    def db_add(self):
-        self.pos_data = Positions(descriptor = self.descriptor, step = 0)
-        self.session.add(self.pos_data)
-        self.session.commit()
+    # def db_add(self):
+    #     self.pos_data = Positions(descriptor = self.descriptor, step = 0)
+    #     session = self.Session()
+    #     try:
+    #         session.add(self.pos_data)
+    #         session.commit()
+    #     finally:
+    #         session.close()
+    #     # self.session.add(self.pos_data)
+    #     # self.session.commit()
+
+    # def db_add(self):
+    #     with self.Session() as session:
+    #         pos = Positions(descriptor=self.descriptor, step=0)
+    #         session.add(pos)
+    #         session.commit()
+    #         session.refresh(pos)   # ← получаем id
+    #         self.pos_id = pos.id
+
+
 
     def proc_shift(self):
+        print('\n\n\n', '=' * 25, 'Shifting')
+        print('Old TEO range:', self.P_min, self.P_max)
         if self.prev_mode == 'D' and self.mode == 'U':
             self.P_max = self.P_min + self.range_width
         elif self.prev_mode == 'U' and self.mode == 'D':
@@ -154,16 +225,15 @@ class BotPos:
             bottom_k = (self.P_act - self.P_min) / (self.P_max - self.P_min)
             self.P_max = self.P_act + self.range_width * top_k
             self.P_min = self.P_act - self.range_width * bottom_k
-
-        print('\n\n\n', '=' * 25, 'Shifting')
-        print('New TEO range:', self.P_min, self.P_max, 'Width:', self.range_width, '\n')
+        print('New TEO range:', self.P_min, self.P_max, '\n')
 
     def proc_swap(self):
         print('\n', '=' * 25, 'Swaping')
         self.actuate_win_reg()
         print('Current price:', self.P_act, 'Range:', self.P_min, self.P_max)
         print('Balances:', self.amm0, self.amm1)
-        if self.mode == 'U' or self.mode == 'D' or self.mode == 'T':                                                # mode == 'UT' or mode == 'UF':
+        check_U = (self.P_act - self.P_min) / (self.P_max - self.P_min) > 0.5
+        if self.mode == 'D' or (self.mode == 'T' and not check_U):                                                # mode == 'UT' or mode == 'UF':
             self.amm1_teo_full = self.amm1 + self.amm0 * self.P_act
             self.k0 = BotPos.clc_amm(self.P_min, self.P_max, self.P_act, 1, 0)
             self.amm0_get_full = (self.k0 * self.amm1_teo_full) / (1 + self.k0 * self.P_act)
@@ -187,7 +257,7 @@ class BotPos:
             # self.amm1 -= self.amm0_get * self.P_act
             # self.amm0 += self.amm0_get
             # am0new = k * am1 / (1 + k * p)
-        else:                                              # mode == 'DT' or mode == 'DF':
+        elif self.mode == 'U' or (self.mode == 'T' and check_U):                                              # mode == 'DT' or mode == 'DF':
             self.amm0_teo_full = self.amm0 + self.amm1 / self.P_act
             self.k1 = BotPos.clc_amm(self.P_min, self.P_max, self.P_act, 1, 1)
             self.amm1_get_full = (self.k1 * self.amm0_teo_full * self.P_act) / (self.k1 + self.P_act)
@@ -211,25 +281,33 @@ class BotPos:
             # self.amm0 -= self.amm1_get / self.P_act
             # self.amm1 += self.amm1_get  
             # am1new = (k * am0 * p) / (k + p)
+
         if x == 1:
             self.db_check()
             self.step = 1
-            self.pos_data.token0_swap = x0
-            self.pos_data.token1_swap = x1
-            self.pos_data.step = self.step
-            self.session.commit()
+            session = self.Session()
+            try:
+                pos = session.get(Positions, self.db_pos_id)
+                pos.token0_swap = x0
+                pos.token1_swap = x1
+                pos.step = self.step
+                session.commit()
+            finally:
+                session.close()
         return x
+
+
 
     def proc_open(self):
         print('\n', '=' * 25, 'Opening')
         print('Price prev:', self.P_act)
+        self.chain.L_fee = self.L_fee
         res = self.chain.get_current_tick()
         if res is not None:
             self.P_act_tick, self.P_act = res
-        x00 = self.P_act
         print('\nTeo opening position assets:')
-        x01 = self.amm0 = self.chain.get_balance_token(0)
-        x02 = self.amm1 = self.chain.get_balance_token(1)
+        self.amm0 = self.chain.get_balance_token(0)
+        self.amm1 = self.chain.get_balance_token(1)
         print('='*25)
         if self.mode == 'U':                                                # mode == 'UT' or mode == 'UF':
             print('Act:', self.P_act_tick, self.chain.price_from_tick(self.P_act_tick))
@@ -273,15 +351,22 @@ class BotPos:
             self.amm0 = self.chain.get_balance_token(0)
             self.amm1 = self.chain.get_balance_token(1)
             self.step = 2
-            self.pos_data.timestamp_IN = datetime.now()
-            self.pos_data.token0_IN = x0
-            self.pos_data.token1_IN = x1
-            self.pos_data.position = self.id
-            self.pos_data.liq = self.L
-            self.pos_data.range_MIN = self.P_min = self.chain.price_from_tick(self.P_min_tick)
-            self.pos_data.range_MAX = self.P_max = self.chain.price_from_tick(self.P_max_tick)
-            self.pos_data.step = self.step
-            self.session.commit()
+            session = self.Session()
+            try:            
+                pos = session.get(Positions, self.db_pos_id)
+                pos.timestamp_IN = datetime.now()
+                pos.token0_IN = x0
+                pos.token1_IN = x1
+                pos.position = self.id
+                pos.liq = self.L
+                pos.range_MIN = self.P_min = self.chain.price_from_tick(self.P_min_tick)
+                pos.range_MAX = self.P_max = self.chain.price_from_tick(self.P_max_tick)
+                pos.step = self.step
+                session.commit()
+            finally:
+                session.close()
+            # self.session.commit()
+
             # print teo min exit
             # print teo max exit
         return x
@@ -292,22 +377,35 @@ class BotPos:
             x, x0, x1 = self.chain.liq_remove(self.id)
             if x == 1:
                 self.step = 3
-                self.pos_data.token0_OUT = x0
-                self.pos_data.token1_OUT = x1
-                self.pos_data.price = self.P_act
-                self.pos_data.step = self.step
-                self.session.commit()
+                session = self.Session()
+                try:
+                    pos = session.get(Positions, self.db_pos_id)
+                    pos.token0_OUT = x0
+                    pos.token1_OUT = x1
+                    pos.price = self.P_act
+                    pos.step = self.step
+                    session.commit()
+                finally:
+                    session.close()
+                # self.session.commit()
+
             return x
         if self.step == 3:
             time.sleep(1)
             x, x0, x1 = self.chain.collect(self.id)
             if x == 1:
                 self.step = 4
-                self.pos_data.timestamp_OUT = datetime.now()
-                self.pos_data.token0_fee = x0 - self.pos_data.token0_OUT
-                self.pos_data.token1_fee = x1 - self.pos_data.token1_OUT
-                self.pos_data.step = self.step
-                self.session.commit()
+                session = self.Session()
+                try:
+                    pos = session.get(Positions, self.db_pos_id)
+                    pos.timestamp_OUT = datetime.now()
+                    pos.token0_fee = x0 - pos.token0_OUT
+                    pos.token1_fee = x1 - pos.token1_OUT
+                    pos.step = self.step
+                    session.commit()
+                finally:
+                    session.close()
+                # self.session.commit()
             return x
         if self.step == 4:
             time.sleep(1)
@@ -318,11 +416,18 @@ class BotPos:
             self.native = self.chain.get_balance_native()
             if x == 1:
                 self.step = 5
-                self.pos_data.balance_0 = self.amm0
-                self.pos_data.balance_1 = self.amm1
-                self.pos_data.native = self.native
-                self.pos_data.step = self.step
-                self.session.commit()
+                session = self.Session()
+                try:
+                    pos = session.get(Positions, self.db_pos_id)
+                    pos.balance_0 = self.amm0
+                    pos.balance_1 = self.amm1
+                    pos.native = self.native
+                    pos.step = self.step
+                    session.commit()
+                finally:
+                    session.close()
+                # self.session.commit()
+
             return x
         return 0
         # if mode == 'UT' or mode == 'UF':
@@ -334,6 +439,8 @@ class BotPos:
         # self.L = 0
 
     def proc_modify(self):
+        print('\n\n\n', '=' * 25, 'Range modifying')
+        print('Old TEO width:', self.range_width)
         if self.mode == 'T':
             self.range_width /= self.range_modifyer
         else:
@@ -342,6 +449,7 @@ class BotPos:
             self.range_width = self.range_width_max
         if self.range_width < self.range_width_min:
             self.range_width = self.range_width_min
+        print('New TEO width:', self.range_width, '\n')
 
     def scan_swap(self, amm, token, by):
         results = {}
@@ -375,7 +483,7 @@ class BotPos:
             res = self.chain.get_current_tick(fee=fee)
             if res is not None:
                 tick, pool["price"] = res
-            if fee == self.L_fee:
+            if fee == self.chain.L_fee:
                 self.P_act_tick, self.P_act = tick, pool["price"]
                 print('|--Lfee', fee, pool["price"], '--|', end='')
             results[fee] = {"liq": pool["liquidity"], "gross": gross, "price": pool["price"]}
@@ -385,19 +493,39 @@ class BotPos:
             self.L_fee = max(valid, key=lambda f: valid[f]["gross"])
         print(f"Gross best {self.L_fee} pool", results[self.L_fee]["gross"])
         now = datetime.now()
-        for fee, data in results.items():
-            new_row = self.ScanSlow(
-                timestamp = now,
-                proto = 'uni3',
-                fee = fee,
-                price = data.get("price"),
-                gross = data.get("gross"),
-                liq = data.get("liq"))
-            self.session.add(new_row)
-        self.session.commit()
+        # for fee, data in results.items():
+        #     new_row = self.ScanSlow(
+        #         timestamp = now,
+        #         proto = 'uni3',
+        #         fee = fee,
+        #         price = data.get("price"),
+        #         gross = data.get("gross"),
+        #         liq = data.get("liq"))
+        #     self.session.add(new_row)
+        # self.session.commit()
+
+        session = self.Session()
+        try:
+            for fee, data in results.items():
+                new_row = self.ScanSlow(
+                    timestamp = now,
+                    proto = 'uni3',
+                    fee = fee,
+                    price = data.get("price"),
+                    gross = data.get("gross"),
+                    liq = data.get("liq")
+                )
+                session.add(new_row)
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
 
     def actuate_win_reg(self):
-        res = self.chain.get_current_tick(fee=self.L_fee)
+        res = self.chain.get_current_tick()
         if res is not None:
             self.P_act_tick, self.P_act = res
         # animation (price level in range area)
@@ -421,8 +549,16 @@ class BotPos:
             actual_min = self.P_min,
             teo_new_max = math.nan,
             teo_new_min = math.nan)
-        self.session.add(new_pos)
-        self.session.commit()
+        
+        session = self.Session()
+        try:
+            session.add(new_pos)
+            session.commit()
+        finally:
+            session.close()
+
+        # self.session.add(new_pos)
+        # self.session.commit()
         self.params = self.load_config(self.descriptor)
         self.params["teo_max"] = self.teo_max
         self.params["teo_min"] = self.teo_min
@@ -439,7 +575,7 @@ class BotPos:
         return self.dyn_period_max - var_aux
     
     def test_range_mod(self):
-        min_check = self.range_width * ((self.range_scale_stable + 1) / 2) > self.range_width_min
+        min_check = self.range_width * ((1 / self.range_modifyer + 1) / 2) > self.range_width_min
         near_check = (
             (self.P_max - self.P_act) / (self.P_max - self.P_min) > self.range_limiter
             and (self.P_act - self.P_min) / (self.P_max - self.P_min) > self.range_limiter

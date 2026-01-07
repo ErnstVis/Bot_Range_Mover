@@ -1,16 +1,16 @@
 {
     "range_modifyer": 1.2,
     "range_shifter": 0.05,
-    "range_limiter": 0.1,
-    "range_move_float": 0.2,
+    "range_limiter": 0.15,
     "range_width_max": 1500,
-    "range_width_min": 100,
-    "range_width": 400,
+    "range_width_min": 230,
+    "range_width": 400.00000000000006,
     "dyn_period_max": 96,
     "dyn_period_min": 24,
-    "prev_mode": "D",
+    "prev_mode": "U",
     "mode": "U",
     "slippage": 0.25,
     "teo_max": 2.971186477894462e-15,
-    "teo_min": 6.0296994308945506e-12
+    "teo_min": 6.0296994308945506e-12,
+    "L_fee": 3000
 }
