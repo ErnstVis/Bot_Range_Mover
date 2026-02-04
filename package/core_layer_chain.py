@@ -12,6 +12,7 @@ import random
 import sys
 sys.stdout.reconfigure(encoding="utf-8")
 
+
 # ===================================================================================== Blockchain operations
 class ChainLink:
     def __init__(self, blockchain, token0, token1, proto, wallet):
@@ -107,6 +108,7 @@ class ChainLink:
         self.S_fee = 3000
         print('-'*25, '\nInit chain layer completed\n')
 
+
     @staticmethod
     def is_reversed(cont, ad_tok0, ad_tok1):
         addr0 = cont.functions.token0().call()
@@ -115,6 +117,7 @@ class ChainLink:
             return False
         else:
             return True
+
 
     def get_balance_native(self, addr=None):
         if addr is None:
@@ -131,6 +134,7 @@ class ChainLink:
             self.balance_native = native = self.connection.from_wei(balance, 'ether')
         print('Balance native :', self.balance_native)
         return native
+
 
     def get_balance_token(self, token, addr=None):
         if token == 0:
@@ -168,17 +172,17 @@ class ChainLink:
         else:
             return self.balance_token1
 
+
     def send_native(self, amount, wait=1):
         amount_in_wei = self.connection.to_wei(amount, "ether")
-        nonce, gas_price = self.pre_transaction(gas_price_limit_gwei=self.gas_limit)
+        tx_opts = self.pre_transaction(gas_price_limit_gwei=self.gas_limit)
         transaction = {
         "to": self.address_withdraw,
         "value": amount_in_wei,
         "gas": 21000,
-        "gasPrice": int(gas_price * 1.05),
-        "nonce": nonce,
-        "chainId": self.chain_id,}
+        **tx_opts,}
         return self.post_transaction(transaction, wait)
+
 
     def send_token(self, amount, token, wait=1):
         if token == 0:
@@ -188,13 +192,12 @@ class ChainLink:
             contract_token = self.contract_token1
             decimals = self.decimals1
         amount_scaled = int(amount * 10**decimals)
-        nonce, gas_price = self.pre_transaction(gas_price_limit_gwei=self.gas_limit)
+        tx_opts = self.pre_transaction(gas_price_limit_gwei=self.gas_limit)
         transaction = contract_token.functions.transfer(self.address_withdraw, amount_scaled).build_transaction({
         "gas": 210000,
-        "gasPrice": int(gas_price * 1.05),
-        "nonce": nonce,
-        "chainId": self.chain_id,})
+        **tx_opts,})
         return self.post_transaction(transaction, wait)
+
 
     def approve_token(self, amount, token, target, wait=1):
         print('\n!APP!', end=' ')
@@ -214,14 +217,13 @@ class ChainLink:
             amount_scaled = int(2**256 - 1)
         else:
             amount_scaled = int(amount * 10**decimals)
-        nonce, gas_price = self.pre_transaction(gas_price_limit_gwei=self.gas_limit)
+        tx_opts = self.pre_transaction(gas_price_limit_gwei=self.gas_limit)
         transaction = contract_token.functions.approve(address, amount_scaled).build_transaction({
         'gas': 210000,
-        'gasPrice':  int(gas_price * 1.05),
-        'nonce': nonce,
-        'chainId': self.chain_id,
+        **tx_opts,
         })
         return self.post_transaction(transaction, wait)
+
 
     def allowance(self, token, target):
         if token == 0:
@@ -239,6 +241,7 @@ class ChainLink:
         allowance = contract_token.functions.allowance(self.address_wallet, address).call()
         return allowance / 10**decimals
 
+
     def price_from_tick(self, tick, fee=None):
         if fee is None:
             fee = self.L_fee
@@ -251,6 +254,7 @@ class ChainLink:
             P = (1.0001**tick) * 10**(self.decimals0 - self.decimals1)
         return(P)
 
+
     def tick_from_price(self, P, fee=None):
         if fee is None:
             fee = self.L_fee
@@ -262,6 +266,7 @@ class ChainLink:
         else:
             tick = math.log(P * 10**(self.decimals1 - self.decimals0)) / math.log(1.0001)
         return(tick)
+
 
     def tick_normalize(self, tick, direction='', fee=None):
         if fee is None:
@@ -303,6 +308,7 @@ class ChainLink:
                 tick_corrected = round(tick)
         return int(tick_corrected)
 
+
     def get_current_tick(self, fee=None, retries=5, delay=5):
         if fee is None:
             fee = self.L_fee
@@ -329,6 +335,7 @@ class ChainLink:
                 print('(', fee, ') Cur price: ', round(self.current_price, 3), ' (', self.current_tick, ')', end=' ', sep = '')
                 return self.current_tick, self.current_price
         return None
+
 
     def get_liquidity(self, tick=None, fee=None, retries=5, delay=5):
         if fee is None:
@@ -369,6 +376,7 @@ class ChainLink:
             liquidity_gross = tick_data[1]
             return liquidity_net, liquidity_gross            
 
+
     def get_swap_ammount_quoter(self, amount, token, by, fee=None):
         if fee is None:
             fee = self.S_fee
@@ -396,6 +404,7 @@ class ChainLink:
             ammount_norm = amount_row / (10 ** self.decimals1)
         return ammount_norm
 
+
     def get_swap_ammount_router(self, amount, amount_lim, token, by, fee=None, deadline=60, wait=1):
         print('\n!SWP!', end=' ')
         if fee is None:
@@ -415,7 +424,7 @@ class ChainLink:
         elif (token == 0 and by == 'Q') or (token == 1 and by == 'I'):
             amount_scaled = int(amount * (10**self.decimals0))
             amount_lim_scaled = int(amount_lim * (10**self.decimals1))
-        nonce, gas_price = self.pre_transaction(gas_price_limit_gwei=self.gas_limit)
+        tx_opts = self.pre_transaction(gas_price_limit_gwei=self.gas_limit)
         if by == 'I':
             params = {
             "tokenIn": tokenIn,
@@ -429,9 +438,7 @@ class ChainLink:
             }
             transaction = self.contract_router.functions.exactInputSingle(params).build_transaction({
             'gas': 300000,
-            'gasPrice': int(gas_price * 1.05),
-            'nonce': nonce,
-            'chainId': self.chain_id,
+            **tx_opts,
             })
         else:
             params = {
@@ -446,9 +453,7 @@ class ChainLink:
             }
             transaction = self.contract_router.functions.exactOutputSingle(params).build_transaction({
             'gas': 300000,
-            'gasPrice': int(gas_price * 1.05),
-            'nonce': nonce,
-            'chainId': self.chain_id,
+            **tx_opts,
             })
         status, receipt = self.post_transaction(transaction, wait)
         if status == 1:
@@ -466,6 +471,7 @@ class ChainLink:
             amm0_ok = 0
             amm1_ok = 0
         return status, amm0_ok, amm1_ok
+
 
     def liq_add(self, range_min, range_max, amount0, amount1, deadline=60, wait=1, fee=None):
         print('\n!ADD!', end=' ')
@@ -490,7 +496,7 @@ class ChainLink:
             address_token1_corrected = self.address_token1
             amount0_corrected = amount0_scaled
             amount1_corrected = amount1_scaled
-        nonce, gas_price = self.pre_transaction(gas_price_limit_gwei=self.gas_limit*1.1)
+        tx_opts = self.pre_transaction(gas_price_limit_gwei=self.gas_limit*1.1)
         params = {
         "token0": address_token0_corrected,
         "token1": address_token1_corrected,
@@ -507,37 +513,38 @@ class ChainLink:
         transaction = self.contract_manager.functions.mint(params).build_transaction({
         "from": self.address_wallet,
         'gas': 800000,
-        'gasPrice': int(gas_price * 1.05),
-        'nonce': nonce,
-        'chainId': self.chain_id,
+        **tx_opts,
         })
         status, receipt = self.post_transaction(transaction, wait)
+        token_id = amm0_ok = amm1_ok = current_liquidity = 0
         if status == 1:
-            events = self.contract_manager.events.IncreaseLiquidity().process_receipt(receipt)
-            for e in events:
-                token_id = e["args"]["tokenId"]
-                amm0 = e["args"]["amount0"]
-                amm1 = e["args"]["amount1"]            
-                if pool['reversed']:
-                    amm0_ok = amm1 / (10**self.decimals0)
-                    amm1_ok = amm0 / (10**self.decimals1)
-                else:
-                    amm0_ok = amm0 / (10**self.decimals0)
-                    amm1_ok = amm1 / (10**self.decimals1)
-            position = self.contract_manager.functions.positions(token_id).call()
-            current_liquidity = position[7]
-        else:
-            token_id = 0
-            amm0_ok = 0
-            amm1_ok = 0
-            current_liquidity = 0
+            ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+            for e in self.contract_manager.events.Transfer().process_receipt(receipt):
+                if e["args"]["from"].lower() == ZERO_ADDRESS:
+                    token_id = e["args"]["tokenId"]
+            for e in self.contract_manager.events.IncreaseLiquidity().process_receipt(receipt):
+                if e["args"]["tokenId"] == token_id:
+                    amm0 = e["args"]["amount0"]
+                    amm1 = e["args"]["amount1"]         
+                    if pool['reversed']:
+                        amm0_ok = amm1 / (10**self.decimals0)
+                        amm1_ok = amm0 / (10**self.decimals1)
+                    else:
+                        amm0_ok = amm0 / (10**self.decimals0)
+                        amm1_ok = amm1 / (10**self.decimals1)
+            try:
+                position = self.contract_manager.functions.positions(token_id).call()
+                current_liquidity = position[7]
+            except Exception as e:
+                print(f"[WARN] position({token_id}) read failed: {e}")
         return status, amm0_ok, amm1_ok, token_id, current_liquidity
+
 
     def liq_remove(self, token_id, deadline=60, wait=1):
         print('\n!REM!', end=' ')
         position = self.contract_manager.functions.positions(token_id).call()
         current_liquidity = position[7]
-        nonce, gas_price = self.pre_transaction(gas_price_limit_gwei=self.gas_limit)
+        tx_opts = self.pre_transaction(gas_price_limit_gwei=self.gas_limit)
         params = {
         "tokenId": token_id,
         "liquidity": current_liquidity,
@@ -548,9 +555,7 @@ class ChainLink:
         transaction = self.contract_manager.functions.decreaseLiquidity(params).build_transaction({
         "from": self.address_wallet,
         "gas": 310000,
-        "gasPrice": int(gas_price * 1.05),
-        "nonce": nonce,
-        "chainId": self.chain_id,
+        **tx_opts,
         })
         status, receipt = self.post_transaction(transaction, wait)
         if status == 1:
@@ -574,9 +579,10 @@ class ChainLink:
             amm1_ok = 0
         return status, amm0_ok, amm1_ok
 
+
     def collect(self, token_id, wait=1):
         print('\n!COL!', end=' ')
-        nonce, gas_price = self.pre_transaction(gas_price_limit_gwei=self.gas_limit*1.1)
+        tx_opts = self.pre_transaction(gas_price_limit_gwei=self.gas_limit*1.1)
         params = {
         "tokenId": token_id,
         "recipient": self.address_wallet,
@@ -586,9 +592,7 @@ class ChainLink:
         transaction = self.contract_manager.functions.collect(params).build_transaction({
         "from": self.address_wallet,
         "gas": 310000,
-        "gasPrice": int(gas_price * 1.05),
-        "nonce": nonce,
-        "chainId": self.chain_id,
+        **tx_opts,
         })
         status, receipt = self.post_transaction(transaction, wait)
         if status == 1:
@@ -612,28 +616,50 @@ class ChainLink:
             amm1_ok = 0
         return status, amm0_ok, amm1_ok
 
+
     def burn(self, token_id, wait=1):
-        nonce, gas_price = self.pre_transaction(gas_price_limit_gwei=self.gas_limit)
+        tx_opts = self.pre_transaction(gas_price_limit_gwei=self.gas_limit)
         transaction = self.contract_manager.functions.burn(token_id).build_transaction({
             "from": self.address_wallet,
             "gas": 210000,
-            "gasPrice": int(gas_price * 1.05),
-            "nonce": nonce,
-            "chainId": self.chain_id,
+            **tx_opts,
         })
         return self.post_transaction(transaction, wait)
 
-    def pre_transaction(self, gas_price_limit_gwei):
-        nonce = self.connection.eth.get_transaction_count(self.address_wallet)
-        gas_price = self.connection.eth.gas_price
-        print('Gas:', self.connection.from_wei(gas_price, 'gwei'), 'gwei', end=' ')
-        gas_price_limit = self.connection.to_wei(gas_price_limit_gwei, 'gwei')
-        if gas_price > gas_price_limit:
-            print('Limited!', end=' ')
-            gas_price = gas_price_limit
-        return nonce, gas_price
 
-    def post_transaction(self, transaction, wait=0):
+    # def pre_transaction(self, gas_price_limit_gwei):
+    #     nonce = self.connection.eth.get_transaction_count(self.address_wallet, "pending")
+    #     block = self.connection.eth.get_block("latest")
+    #     base_fee = block["baseFeePerGas"]
+    #     priority_fee = self.connection.to_wei(0.1, "gwei")
+    #     max_fee = base_fee * 2 + priority_fee
+    #     print(
+    #         'Gas:',
+    #         self.connection.from_wei(base_fee, 'gwei'),
+    #         '+',
+    #         self.connection.from_wei(priority_fee, 'gwei'),
+    #         '=',
+    #         self.connection.from_wei(max_fee, 'gwei'),
+    #         'gwei',
+    #         end=' '
+    #     )
+    #     return nonce, max_fee, priority_fee
+
+
+    def pre_transaction(self, gas_price_limit_gwei):
+        nonce = self.connection.eth.get_transaction_count(self.address_wallet, "pending")
+        if self.chain_id in (137):
+            gas_price = int(self.connection.eth.gas_price * 1.15)
+            return {"nonce": nonce, "gasPrice": gas_price, "chainId": self.chain_id,}
+        else:
+            block = self.connection.eth.get_block("latest")
+            base_fee = block["baseFeePerGas"]
+            priority_fee = self.connection.to_wei(0.1, "gwei")
+            max_fee = base_fee * 2 + priority_fee
+            return {"nonce": nonce, "maxFeePerGas": max_fee, "maxPriorityFeePerGas": priority_fee, "chainId": self.chain_id,}
+
+
+    def post_transaction(self, transaction, wait=1):
         try:
             signed_transaction = self.connection.eth.account.sign_transaction(transaction, self.key_wallet)
             transaction_hash = self.connection.eth.send_raw_transaction(signed_transaction.raw_transaction)
@@ -652,6 +678,7 @@ class ChainLink:
                     print("Timed out!")
                     return 9, 0
             else:
+                print('debug: no wait for receipt')
                 return -1, 0
         except (BadResponseFormat, Web3Exception) as e:
             print(f"Web3 error: {e}")

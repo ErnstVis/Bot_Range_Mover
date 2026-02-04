@@ -1,0 +1,16 @@
+[
+    {
+        "name": "getExchangeRate",
+        "outputs": [{"type": "uint256"}],
+        "inputs": [],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "name": "stEthPerToken",
+        "outputs": [{"type": "uint256"}],
+        "inputs": [],
+        "stateMutability": "view",
+        "type": "function"
+    }
+]

@@ -97,8 +97,9 @@ class BotPos:
         res = self.chain.get_current_tick()
         if res is not None:
             self.P_act_tick, self.P_act = res
-        self.P_min = self.P_act - self.range_width / 2
-        self.P_max = self.P_act + self.range_width / 2
+        self.P_min = self.init_min
+        self.P_max = self.init_max
+        self.rangemod_not_needed = False
         self.ScanFast, self.ScanSlow = make_scan_class(self.descriptor)
         load_dotenv("private/secrets.env")
 
@@ -134,7 +135,7 @@ class BotPos:
                 pos = Positions(descriptor=self.descriptor, step=0)
                 session.add(pos)
                 session.commit()
-                session.refresh(pos)   # ← получаем id
+                session.refresh(pos)   # получаем id
                 print('Added')
             elif pos.step != 1:
                 self.id = pos.position
@@ -142,12 +143,16 @@ class BotPos:
                 self.P_min = pos.range_MIN
                 print('Last position ID:', self.id)
             else:
-                print('Debug: incompleted position detected, setting step to 0')
+                print('Debug: incompleted position detected, step == 1, setting step to 0')
+                self.rangemod_not_needed = True
                 pos.step = 0
                 session.commit()
             self.db_pos_id = pos.id
             self.step = pos.step
-            self.timestamp_IN = pos.timestamp_IN
+            if pos.timestamp_IN:
+                self.timestamp_IN = pos.timestamp_IN
+            else:
+                self.timestamp_IN = datetime.now()
             print(
                 'Complecting of last position:',
                 self.step,
@@ -209,6 +214,10 @@ class BotPos:
 
     def proc_shift(self):
         print('\n\n\n', '=' * 25, 'Shifting')
+        if self.rangemod_not_needed == True:
+            print('Range modification not needed, skipping...')
+            self.step = 10
+            return
         print('Old TEO range:', self.P_min, self.P_max)
         if self.prev_mode == 'D' and self.mode == 'U':
             self.P_max = self.P_min + self.range_width
@@ -225,6 +234,7 @@ class BotPos:
             bottom_k = (self.P_act - self.P_min) / (self.P_max - self.P_min)
             self.P_max = self.P_act + self.range_width * top_k
             self.P_min = self.P_act - self.range_width * bottom_k
+        self.step = 10
         print('New TEO range:', self.P_min, self.P_max, '\n')
 
     def proc_swap(self):
@@ -294,6 +304,8 @@ class BotPos:
                 session.commit()
             finally:
                 session.close()
+        else:
+            print('Debug: swap failed')
         return x
 
 
@@ -369,6 +381,8 @@ class BotPos:
 
             # print teo min exit
             # print teo max exit
+        else:
+            print('Debug: add failed')
         return x
 
     def proc_close(self):
@@ -388,6 +402,8 @@ class BotPos:
                 finally:
                     session.close()
                 # self.session.commit()
+            else:
+                print('Debug: remove failed')
 
             return x
         if self.step == 3:
@@ -406,6 +422,8 @@ class BotPos:
                 finally:
                     session.close()
                 # self.session.commit()
+            else:
+                print('Debug: collect failed')
             return x
         if self.step == 4:
             time.sleep(1)
@@ -427,6 +445,8 @@ class BotPos:
                 finally:
                     session.close()
                 # self.session.commit()
+            else:
+                print('Debug: burn failed')
 
             return x
         return 0
@@ -440,6 +460,10 @@ class BotPos:
 
     def proc_modify(self):
         print('\n\n\n', '=' * 25, 'Range modifying')
+        if self.rangemod_not_needed == True:
+            print('Range modification not needed, skipping...')
+            self.rangemod_not_needed = False        # block modifications for auto mode. reset flag
+            return
         print('Old TEO width:', self.range_width)
         if self.mode == 'T':
             self.range_width /= self.range_modifyer

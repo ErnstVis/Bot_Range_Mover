@@ -5,6 +5,12 @@ from datetime import datetime, timedelta
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="eth_utils")
 
+
+""" 
+Main working version 1.0 
+One pair, dynamic range moving bot with uniswap v3, fee level auto selection
+"""
+
 def main():
     parser = argparse.ArgumentParser(description="Example script with arguments.")
     parser.add_argument(
@@ -45,10 +51,13 @@ def main():
         print('Unknown mode arg...')
         return
     if args.trade == 'on':
-        trade_on = True
+        trade_on = 1
         print('Trading is ON')
+    elif args.trade == 'once':
+        trade_on = 2
+        print('Manualy swift')
     else:
-        trade_on = False
+        trade_on = 0
         print('Trading is OFF')
 
     chain = ChainLink(ch, tok0, tok1, proto, 'test')
@@ -58,9 +67,10 @@ def main():
     count = 0
     while True:
         # JOB PROCESSING OR JUST DATA COLLECTION
-        if trade_on:
+        if trade_on == 1:
             if pos.step == 0:      # Begined
                 pos.proc_shift()
+            elif pos.step == 10:
                 if pos.proc_swap() != 1:
                     print('\nSTATUS NOT 1...')
                     time.sleep(30)
@@ -71,7 +81,7 @@ def main():
                     time.sleep(30)
                     continue
             elif pos.step == 2:                     # Opened
-                if count >= 60:
+                if count >= 120:
                     pos.actuate_win_slow()
                     count = 0
                 else:
@@ -129,13 +139,44 @@ def main():
             elif pos.step == 5:
                 pos.proc_modify()
                 pos.params = pos.load_config(desc)
-                pos.params["range_width"] = pos.range_width
+                pos.params["range_width"] = pos.P_max - pos.P_min
                 pos.params["L_fee"] = pos.L_fee
                 pos.save_config(pos.params, desc)
                 pos.chain.L_fee = pos.L_fee         # Put best pool of last hour to new position
                 pos.step = 0
+
+        elif trade_on == 2:
+            if pos.step == 2 or pos.step == 3 or pos.step == 4:
+                print('\nManual close triggered...')
+                if pos.proc_close() != 1:
+                    print('\nSTATUS NOT 1...')
+                    time.sleep(30)
+                    continue
+            elif pos.step == 5:
+                pos.step = 10
+                pos.P_min = pos.init_min
+                pos.P_max = pos.init_max
+                pos.chain.L_fee = pos.L_fee
+            elif pos.step == 10:
+                print('\nManual swap triggered...')
+                if pos.proc_swap() != 1:
+                    print('\nSTATUS NOT 1...')
+                    time.sleep(30)
+                    continue
+            elif pos.step == 1:
+                print('\nManual open triggered...')
+                if pos.proc_open() != 1:
+                    print('\nSTATUS NOT 1...')
+                    time.sleep(30)
+                    continue
+                pos.params = pos.load_config(desc)
+                pos.params["range_width"] = pos.P_max - pos.P_min
+                pos.params["L_fee"] = pos.L_fee
+                pos.save_config(pos.params, desc)
+                break
+
         else:
-            if count >= 60:
+            if count >= 120:
                 pos.actuate_win_slow()
                 count = 0
             else:
