@@ -6,5 +6,6 @@ pictures/
 logs/
 trash/
 archive/
+saves/
 .env
 *.env
