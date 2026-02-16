@@ -1,21 +1,25 @@
 from dotenv import load_dotenv
-from web3 import Web3
+from web3 import Web3, AsyncWeb3
 from web3.exceptions import TimeExhausted
-from web3.providers.persistent import WebSocketProvider
+from web3.providers.persistent import WebSocketProvider, AsyncIPCProvider
 from web3.exceptions import Web3Exception, TimeExhausted, BadResponseFormat, ContractLogicError, Web3RPCError
 import requests
 import time
 import os
 import math
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 import random
 import sys
 import matplotlib.pyplot as plt
 from collections import deque
-from itertools import islice
-sys.stdout.reconfigure(encoding="utf-8")
 
+import asyncio
+from asyncio.exceptions import IncompleteReadError
+import websockets
+from websockets.exceptions import ConnectionClosedError
+
+sys.stdout.reconfigure(encoding="utf-8")
 
 
 class ChainLink2:
@@ -82,10 +86,13 @@ class ChainLink2:
         self.wsteth_contract = w3_eth.eth.contract(address="0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0", abi=self.abi_special)
 
         self.tokens_short = {
-            "USDC": self.tokens["USDC"],
-            "USDCe": self.tokens["USDCe"],
             "ETH": self.tokens["ETH"],
             "wETH": self.tokens["wETH"],
+            "USDC": self.tokens["USDC"],
+            "USDCe": self.tokens["USDCe"],
+            "USDT": self.tokens["USDT"],
+            "DAI": self.tokens["DAI"],
+            "POL": self.tokens["POL"],
         }
 
         self.contract_factory = self.connection.eth.contract(address=self.address_factory, abi=self.abi_factory)
@@ -100,6 +107,95 @@ class ChainLink2:
         
         self.pools_data = {}
         self.combinations_starts = 0
+
+
+    def resolve_pool_key(self, pools, token_sym0, token_sym1, fee):
+        token_addr0 = self.tokens[token_sym0]
+        token_addt1 = self.tokens[token_sym1]
+        key = (token_addr0, token_addt1, fee) if token_addr0.lower() < token_addt1.lower() else (token_addt1, token_addr0, fee)
+        value = pools.get(key)
+        return key, value
+
+
+    async def listener(self, key, value):
+        addr = value["address"]
+        dec0 = self.tokens_data[key[0]]["decimals"]
+        dec1 = self.tokens_data[key[1]]["decimals"]
+        sym0 = self.tokens_data[key[0]]["cex_name"]
+        sym1 = self.tokens_data[key[1]]["cex_name"]
+        fee = str(key[2])
+        while True:
+            try:
+                async with AsyncWeb3(
+                    WebSocketProvider(self.rpcws + self.key_rpc)
+                ) as w3:
+                    pool = w3.eth.contract(address=addr, abi=self.abi_pool)
+                    await w3.eth.subscribe(
+                        "logs",
+                        {"address": addr}
+                    )
+                    async for msg in w3.socket.process_subscriptions():
+                        log = msg.get("result")
+                        if not log:
+                            continue
+                        ts = datetime.now()
+                        try:
+                            event = pool.events.Swap().process_log(log)                    
+                            a0 = event["args"]["amount0"] / 10**dec0
+                            a1 = event["args"]["amount1"] / 10**dec1
+                            sqrt_price = event["args"]["sqrtPriceX96"]
+                            price = ( (sqrt_price / 2**96) ** 2 * 10**dec0 / 10**dec1 )
+                            print(
+                                f"[{ts}]\t {sym0} / {sym1} / {fee} "
+                                f"\ta0={a0:.6f} \ta1={a1:.6f} "
+                                f"\tprice={price:.4f}"
+                            )
+                            continue
+                        except:
+                            pass
+                        try:
+                            event = pool.events.Mint().process_log(log)
+                            a0 = event["args"]["amount0"] / 10**dec0
+                            a1 = event["args"]["amount1"] / 10**dec1
+                            args = event["args"]
+                            print(
+                                f"MINT "
+                                f"[{ts}]\t {sym0} / {sym1} / {fee} "
+                                f"range=[{args['tickLower']}, {args['tickUpper']}] "
+                                f"liq={args['amount']} "
+                                f"\ta0={a0:.6f} \ta1={a1:.6f} "
+                            )
+                            continue
+                        except:
+                            pass
+                        try:
+                            event = pool.events.Burn().process_log(log)
+                            a0 = event["args"]["amount0"] / 10**dec0
+                            a1 = event["args"]["amount1"] / 10**dec1
+                            args = event["args"]
+                            print(
+                                f"BURN "
+                                f"[{ts}]\t {sym0} / {sym1} / {fee} "
+                                f"range=[{args['tickLower']}, {args['tickUpper']}] "
+                                f"liq={args['amount']} "
+                                f"\ta0={a0:.6f} \ta1={a1:.6f} "
+                            )
+                            continue
+                        except:
+                            pass
+            except (
+                asyncio.IncompleteReadError,
+                websockets.exceptions.ConnectionClosedError,
+                ConnectionError,
+            ) as e:
+                print(f"[WS] {sym0} / {sym1} / {fee} reconnect:", e)
+                await asyncio.sleep(2)
+            except Exception as e:
+                print(f"[FATAL] listener {sym0} / {sym1} / {fee}:", e)
+                await asyncio.sleep(5)
+
+
+
 
     def scan_tokens(self, short=False):
         if short:
@@ -172,61 +268,26 @@ class ChainLink2:
         print(f"\nTotal pools added: {len(self.pools_data)}\n")
 
 
-    ''' 
-    def scan_pool(self, t0, t1, fee):
-        pool_address = self.contract_factory.functions.getPool(t0, t1, fee).call()
-        if pool_address == "0x0000000000000000000000000000000000000000":
-            print('Pool', self.tokens_data[t0]["cex_name"], 
-            self.tokens_data[t1]["cex_name"], 
-            fee, '- not initiated')
-            return
-        pool_contract = self.connection.eth.contract(address=pool_address, abi=self.abi_pool)
-        tick_spacing = pool_contract.functions.tickSpacing().call()
-        # check 0/1 order
-        addr0 = pool_contract.functions.token0().call()
-        addr1 = pool_contract.functions.token1().call()
-        if addr0.lower() == t0.lower() and addr1.lower() == t1.lower():
-            pool_reversed = False
-        else:
-            pool_reversed = True
-        key = (addr0, addr1, fee)
-        if key in self.pools_data: 
-            print('Pool', self.tokens_data[addr0]["cex_name"], 
-            self.tokens_data[addr1]["cex_name"], 
-            fee, '- alredy listed')
-            return
-        self.pools_data[key] = {
-            "address": pool_address,
-            "contract": pool_contract,
-            "spacing": tick_spacing,
-            "reversed": pool_reversed,
-            "cex_price0": deque([0] * 168, maxlen=168),
-            "cex_price1": deque([0] * 168, maxlen=168),
-            "dex_price": deque([0] * 168, maxlen=168),
-            "liquidity": deque([0] * 168, maxlen=168),
-            "gross0": deque([0] * 168, maxlen=168),
-            "gross1": deque([0] * 168, maxlen=168),
-            "balance0": deque([0] * 168, maxlen=168),
-            "balance1": deque([0] * 168, maxlen=168),}
-        print('Pool', self.tokens_data[addr0]["cex_name"], 
-            self.tokens_data[addr1]["cex_name"], 
-            fee, pool_address, 'added. Spacing:', tick_spacing)
-    '''
 
     def get_token_reference_price(self, name):
-        def get_from_binance(sym):
+
+        def get_from_binance(sym, retries=3):
             pair = sym + 'USDC'
-            timeout = 10
-            try:
-                url = "https://api.binance.com/api/v3/ticker/24hr"
-                params = {"symbol": pair}
-                r = requests.get(url, params=params, timeout=timeout)
-                r.raise_for_status()
-                data = r.json()
-                snapshot = float(data["bidPrice"])
-            except Exception as e:
-                print(f"Error fetching price for {pair}: {e}")
-            return snapshot
+            url = "https://api.binance.com/api/v3/ticker/bookTicker"
+            params = {"symbol": pair}
+            for attempt in range(retries):
+                try:
+                    r = requests.get(url, params=params, timeout=5)
+                    r.raise_for_status()
+                    data = r.json()
+                    bid = float(data["bidPrice"])
+                    ask = float(data["askPrice"])
+                    return (bid + ask) / 2
+                except requests.exceptions.RequestException as e:
+                    print(f"[Binance retry {attempt+1}] {pair}: {e}")
+                    time.sleep(5)
+            return 0
+
         def get_proto_nominal_reth():
             reth_rate_raw = self.reth_contract.functions.getExchangeRate().call()
             reth_rate = reth_rate_raw / 10 ** self.tokens_data[self.tokens[name]]["decimals"]
@@ -306,12 +367,12 @@ class ChainLink2:
             gross0_usd = gross0_abs_d * token0_cex_price
             gross1_usd = gross1_abs_d * token1_cex_price
             gross_usd = gross0_usd + gross1_usd
-            gross_rel = (gross_usd / balance_pool * 100 * (24 / interval_h) * 365)          # if balance_pool > 5 else 0
+            gross_rel = (gross_usd / balance_pool * 100 * (24 / interval_h) * 365) if balance_pool > 5 else 0
             sym0 = self.tokens_data[key[0]]["cex_name"]
             sym1 = self.tokens_data[key[1]]["cex_name"]
             fee = key[2]                                          # filter value for show
             cex_price = token0_cex_price / token1_cex_price
-            price_delta = (dex_price - cex_price) / cex_price * 100                         # if cex_price != 0 else 0
+            price_delta = (dex_price - cex_price) / cex_price * 100 if cex_price != 0 else 0
             if value["reversed"]:
                 dex_price_w = 1 / dex_price if dex_price > 0 else 0
                 cex_price_w = 1 / cex_price if cex_price > 0 else 0
@@ -371,38 +432,42 @@ class ChainLink2:
                     g1d = g1 - g1p if g1 and g1p else 0
                     g0a = g0d * l
                     g1a = g1d * l
-                    g0u = g0a * dpw
-                    g1u = g1a * cpw
+                    g0u = g0a * cp0
+                    g1u = g1a * cp1
                     gu = g0u + g1u
-                    gr = (gu / bu * 100 * (24 / interval_h) * 365) if bu > 0 and interval_h > 0 else 0
+                    gr = (gu / bu * 100 * (24 / interval_h) * 365) if bu and interval_h else 0
+                    if gr < 0 or gr > 200:
+                        print('debug' + str(gr) + str(gu) + str(bu) + str(interval_h))
                     apr_list.append(gr)         # apr add
                 # ===== PLOT =====
                 x = range(len(dp_list))  # итерации
                 plt.style.use("dark_background")
                 fig, ax1 = plt.subplots(figsize=(18, 12))
                 # ===== AXIS 1: Prices =====
-                ax1.plot(x, dp_list, label="DEX price", linewidth=1)
-                ax1.plot(x, cp_list, label="CEX price", linewidth=1)
+                ax1.plot(x, dp_list, color="#22C049FF", label="DEX price", linewidth=1)
+                ax1.plot(x, cp_list, color="#6EFF4AFF", label="CEX price", linewidth=1)
                 ax1.set_ylabel("Price")
                 ax1.grid(True, linestyle="--", alpha=0.4)
                 # ===== AXIS 2: APR =====
                 ax2 = ax1.twinx()
-                ax2.plot(x, apr_list, color="#95D44CFF", linewidth=1, label="APR")
-                ax2.set_ylabel("APR %")
+                ax2.plot(x, apr_list, color="#FF2626FF", linewidth=1, label="APR")
                 ax2.set_ylim(0, 200)
+                ax2.set_yticks([])
+                ax2.spines["right"].set_visible(False)
                 # ===== AXIS 3: Balances (log scale) =====
                 ax3 = ax1.twinx()
-                ax3.spines["right"].set_position(("axes", 1.08))  # 3 axis shift
-                ax3.plot(x, b0_list, color="#58C3D1FF", linewidth=1, label="Balance 0")
-                ax3.plot(x, b1_list, color="#4787E9FF", linewidth=1, label="Balance 1")
+                ax3.plot(x, b0_list, color="#3BE8FFFF", linewidth=1, label="Balance 0")
+                ax3.plot(x, b1_list, color="#4797FFFF", linewidth=1, label="Balance 1")
                 ax3.set_yscale("log")
-                ax3.set_ylabel("Balance (log scale)")
+                ax3.set_ylim(1, 10**7)
+                ax3.set_yticks([])
+                ax3.spines["right"].set_visible(False)
                 # ===== Legends =====
                 lines = ax1.get_lines() + ax2.get_lines() + ax3.get_lines()
                 labels = [l.get_label() for l in lines]
                 ax1.legend(lines, labels, loc="upper left")
                 fig.tight_layout()
-                plt.savefig("saves/" + sym0 + sym1 + ".png", dpi=200)
+                plt.savefig("saves/" + sym0 + sym1 + str(fee) + ".png", dpi=200)
                 plt.close()
 
         if use != 'Dust' and use != 'Work':
@@ -582,16 +647,16 @@ class ChainLink2:
             self.connection, self.address_wallet, self.chain_id)
 
     def manual_swap_1(self):
-        in_swap = 1.1 # usd
-        out_limit = 1 # usd
+        in_swap = 1.5 # usd
+        out_limit = 1.4 # usd
         self.get_swap_ammount_router(self.contract_router, 
             self.tokens["USDC"],
-            self.tokens["GMT"],
+            self.tokens["USDT"],
             self.tokens_data[self.tokens["USDC"]]["decimals"],
-            self.tokens_data[self.tokens["GMT"]]["decimals"],
-            3000, 
+            self.tokens_data[self.tokens["USDT"]]["decimals"],
+            500, 
             in_swap,
-            out_limit / self.tokens_data[self.tokens["GMT"]]["cex_price"],
+            out_limit / self.tokens_data[self.tokens["USDT"]]["cex_price"],
             self.connection, self.address_wallet, self.chain_id)
 
     def manual_swap_2(self):

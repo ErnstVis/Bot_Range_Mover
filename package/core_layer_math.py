@@ -141,9 +141,10 @@ class BotPos:
                 self.id = pos.position
                 self.P_max = pos.range_MAX
                 self.P_min = pos.range_MIN
+                self.range_width = self.P_max - self.P_min
                 print('Last position ID:', self.id)
             else:
-                print('Debug: incompleted position detected, step == 1, setting step to 0')
+                print('Debug: incompleted position detected, step == ', pos.step , ', setting step to 0')
                 self.rangemod_not_needed = True
                 pos.step = 0
                 session.commit()

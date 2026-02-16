@@ -156,6 +156,7 @@ def main():
                 pos.step = 10
                 pos.P_min = pos.init_min
                 pos.P_max = pos.init_max
+                pos.range_width = pos.P_max - pos.P_min
                 pos.chain.L_fee = pos.L_fee
             elif pos.step == 10:
                 print('\nManual swap triggered...')

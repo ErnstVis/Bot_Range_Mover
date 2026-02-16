@@ -309,7 +309,7 @@ class ChainLink:
         return int(tick_corrected)
 
 
-    def get_current_tick(self, fee=None, retries=5, delay=5):
+    def get_current_tick(self, fee=None, retries=5, delay=60):
         if fee is None:
             fee = self.L_fee
         pool = self.pools.get(fee)
@@ -337,7 +337,7 @@ class ChainLink:
         return None
 
 
-    def get_liquidity(self, tick=None, fee=None, retries=5, delay=5):
+    def get_liquidity(self, tick=None, fee=None, retries=60, delay=5):
         if fee is None:
             fee = self.L_fee
         pool = self.pools.get(fee)
@@ -648,7 +648,7 @@ class ChainLink:
 
     def pre_transaction(self, gas_price_limit_gwei):
         nonce = self.connection.eth.get_transaction_count(self.address_wallet, "pending")
-        if self.chain_id in (137):
+        if self.chain_id in (137,):
             gas_price = int(self.connection.eth.gas_price * 1.15)
             return {"nonce": nonce, "gasPrice": gas_price, "chainId": self.chain_id,}
         else:

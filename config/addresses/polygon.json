@@ -1,5 +1,6 @@
 {
     "rpc": "https://polygon-mainnet.infura.io/v3/",
+    "rpcws": "wss://polygon-mainnet.infura.io/ws/v3/",
 
     "uniswap_factory": "0x1F98431c8aD98523631AE4a59f267346ea31F984",
     "uniswap_router": "0xE592427A0AEce92De3Edee1F18E0157C05861564",
