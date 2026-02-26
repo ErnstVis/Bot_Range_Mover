@@ -1,0 +1,26 @@
+{
+    "rpc": "https://mainnet.infura.io/v3/",
+    "rpcws": "wss://mainnet.infura.io/ws/v3/",
+
+    "uniswap_factory": "0x1F98431c8aD98523631AE4a59f267346ea31F984",
+    "uniswap_router": "0xE592427A0AEce92De3Edee1F18E0157C05861564",
+    "uniswap_quoter": "0xb27308f9F90D607463bb33eA1BeBb41C27CE5AB6",
+    "uniswap_quoter_v2": "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
+    "uniswap_manager": "0xC36442b4a4522E871399CD717aBDD847Ab11FE88",
+
+    "weth": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+    "usdc": "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    "usdt": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+
+    "tokens": {
+        "USDC": "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "USDT": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+        "ETH": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+        "cbETH": "0xbe9895146f7af43049ca1c1ae358b0541ea49704",
+        "rETH": "0xae78736Cd615f374D3085123A210448E74Fc6393",
+        "ezETH": "0xbf5495Efe5DB9ce00f80364C8B423567e58d2110",
+        "weETH": "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee",
+        "sfrxETH": "0xac3E018457B222d93114458476f3E3416Abbe38F",
+        "wstETH": "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0"
+    }
+}

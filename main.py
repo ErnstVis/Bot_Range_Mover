@@ -80,6 +80,10 @@ def main():
                     print('\nSTATUS NOT 1...')
                     time.sleep(30)
                     continue
+                pos.params = pos.load_config(desc)
+                pos.params["range_width"] = pos.P_max - pos.P_min
+                pos.params["L_fee"] = pos.L_fee
+                pos.save_config(pos.params, desc)
             elif pos.step == 2:                     # Opened
                 if count >= 120:
                     pos.actuate_win_slow()
@@ -138,10 +142,6 @@ def main():
                     continue
             elif pos.step == 5:
                 pos.proc_modify()
-                pos.params = pos.load_config(desc)
-                pos.params["range_width"] = pos.P_max - pos.P_min
-                pos.params["L_fee"] = pos.L_fee
-                pos.save_config(pos.params, desc)
                 pos.chain.L_fee = pos.L_fee         # Put best pool of last hour to new position
                 pos.step = 0
 

@@ -13,7 +13,7 @@ import random
 import sys
 import matplotlib.pyplot as plt
 from collections import deque
-
+import numpy as np
 import asyncio
 from asyncio.exceptions import IncompleteReadError
 import websockets
@@ -37,6 +37,9 @@ class ChainLink2:
             self.gas_limit = 1500
         elif blockchain == 'optimism':
             path = 'config/addresses/optimism.json'
+        elif blockchain == 'mainnet':
+            path = 'config/addresses/mainnet.json'
+            self.gas_limit = 0.15
         with open(path, 'r') as f:
             params = json.load(f)
         self.tokens = params.get("tokens", {})      # get tokens dict, order is important
@@ -79,20 +82,16 @@ class ChainLink2:
             return
         print('Address my:', self.address_wallet)
 
-        ETH_RPC = "https://mainnet.infura.io/v3/" + self.key_rpc
-        w3_eth = Web3(Web3.HTTPProvider(ETH_RPC))
-
-        self.reth_contract = w3_eth.eth.contract(address="0xae78736Cd615f374D3085123A210448E74Fc6393", abi=self.abi_special)
-        self.wsteth_contract = w3_eth.eth.contract(address="0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0", abi=self.abi_special)
+        # ETH_RPC = "https://mainnet.infura.io/v3/" + self.key_rpc
+        # w3_eth = Web3(Web3.HTTPProvider(ETH_RPC))
+        # self.reth_contract = w3_eth.eth.contract(address="0xae78736Cd615f374D3085123A210448E74Fc6393", abi=self.abi_special)
+        # self.wsteth_contract = w3_eth.eth.contract(address="0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0", abi=self.abi_special)
 
         self.tokens_short = {
             "ETH": self.tokens["ETH"],
-            "wETH": self.tokens["wETH"],
-            "USDC": self.tokens["USDC"],
-            "USDCe": self.tokens["USDCe"],
-            "USDT": self.tokens["USDT"],
-            "DAI": self.tokens["DAI"],
-            "POL": self.tokens["POL"],
+            "weETH": self.tokens["weETH"],
+            "rETH": self.tokens["rETH"],
+            "wstETH": self.tokens["wstETH"],
         }
 
         self.contract_factory = self.connection.eth.contract(address=self.address_factory, abi=self.abi_factory)
@@ -109,13 +108,8 @@ class ChainLink2:
         self.combinations_starts = 0
 
 
-    def resolve_pool_key(self, pools, token_sym0, token_sym1, fee):
-        token_addr0 = self.tokens[token_sym0]
-        token_addt1 = self.tokens[token_sym1]
-        key = (token_addr0, token_addt1, fee) if token_addr0.lower() < token_addt1.lower() else (token_addt1, token_addr0, fee)
-        value = pools.get(key)
-        return key, value
 
+    ''' ASYNC FNS '''
 
     async def listener(self, key, value):
         addr = value["address"]
@@ -144,12 +138,18 @@ class ChainLink2:
                             a0 = event["args"]["amount0"] / 10**dec0
                             a1 = event["args"]["amount1"] / 10**dec1
                             sqrt_price = event["args"]["sqrtPriceX96"]
-                            price = ( (sqrt_price / 2**96) ** 2 * 10**dec0 / 10**dec1 )
+                            dex_price = ( (sqrt_price / 2**96) ** 2 * 10**dec0 / 10**dec1 )
+                            swap_price = abs(a1 / a0) if a0 and a1 else 0
                             print(
                                 f"[{ts}]\t {sym0} / {sym1} / {fee} "
-                                f"\ta0={a0:.6f} \ta1={a1:.6f} "
-                                f"\tprice={price:.4f}"
-                            )
+                                f"\ta0= {a0:.6f} \ta1= {a1:.6f} "
+                                f"\tswap price= {swap_price:.5f}"
+                                f"\tact price= {dex_price:.5f}")
+
+                                                                    # test part
+                            await asyncio.to_thread(
+                                self.check_fast_data(key, value, a0, a1, swap_price, dex_price))
+                            
                             continue
                         except:
                             pass
@@ -196,6 +196,45 @@ class ChainLink2:
 
 
 
+
+    def check_fast_data(self, key, value, a0, a1, swap_price, dex_price):
+        addr = value["address"]
+        dec0 = self.tokens_data[key[0]]["decimals"]
+        dec1 = self.tokens_data[key[1]]["decimals"]
+        sym0 = self.tokens_data[key[0]]["cex_name"]
+        sym1 = self.tokens_data[key[1]]["cex_name"]
+        fee = str(key[2])
+        # dex_price = self.get_slot_data(value["contract"], dec0, dec1)[0]                      # same from swap result
+        # get_swap_ammount_quoter(cls, quoter_cntr, token_in, token_out, dec_in, dec_out, fee, amount, exact='I')
+
+        # test back swap!
+        if swap_price > dex_price * 1.001 or swap_price < dex_price * 0.999:
+            print(f"Price delta detected!")
+
+        
+        if a0 > a1:
+            amm_in = abs(a1)
+            amm_out = self.get_swap_ammount_quoter(self.contract_quoter, 
+                key[1], key[0], dec1, dec0, key[2], amm_in)
+        else:
+            amm_in = abs(a0)
+            amm_out = self.get_swap_ammount_quoter(self.contract_quoter, 
+                key[0], key[1], dec0, dec1, key[2], amm_in)
+        print(f"Quoter back swap ammouns. IN {amm_in:.6f}\tOUT {amm_out:.6f}\tPrice {amm_out/amm_in:.5f}")
+
+
+        balance0 = self.get_balance_token(self.tokens_data[key[0]]["contract"], value["address"], dec0)
+        balance1 = self.get_balance_token(self.tokens_data[key[1]]["contract"], value["address"], dec1)
+        print(f"New data - balance0: {balance0:.3f} | balance1: {balance1:.3f}")
+        pass
+
+
+
+
+
+
+
+    ''' ROUTINE FNS '''
 
     def scan_tokens(self, short=False):
         if short:
@@ -253,21 +292,19 @@ class ChainLink2:
                         "contract": pool_contract,
                         "spacing": tick_spacing,
                         "reversed": pool_reversed,
-                        "cex_price0": deque([0] * 168, maxlen=168),
-                        "cex_price1": deque([0] * 168, maxlen=168),
-                        "dex_price": deque([0] * 168, maxlen=168),
-                        "liquidity": deque([0] * 168, maxlen=168),
-                        "gross0": deque([0] * 168, maxlen=168),
-                        "gross1": deque([0] * 168, maxlen=168),
-                        "balance0": deque([0] * 168, maxlen=168),
-                        "balance1": deque([0] * 168, maxlen=168),}
+                        "cex_price0": deque([0] * 400, maxlen=400),
+                        "cex_price1": deque([0] * 400, maxlen=400),
+                        "dex_price": deque([0] * 400, maxlen=400),
+                        "liquidity": deque([0] * 400, maxlen=400),
+                        "gross0": deque([0] * 400, maxlen=400),
+                        "gross1": deque([0] * 400, maxlen=400),
+                        "balance0": deque([0] * 400, maxlen=400),
+                        "balance1": deque([0] * 400, maxlen=400),}
                     print('Pool', self.tokens_data[addr0]["cex_name"], 
                         self.tokens_data[addr1]["cex_name"], 
                         fee, pool_address, 'added. Spacing:', tick_spacing)
 
         print(f"\nTotal pools added: {len(self.pools_data)}\n")
-
-
 
     def get_token_reference_price(self, name):
 
@@ -288,14 +325,14 @@ class ChainLink2:
                     time.sleep(5)
             return 0
 
-        def get_proto_nominal_reth():
-            reth_rate_raw = self.reth_contract.functions.getExchangeRate().call()
-            reth_rate = reth_rate_raw / 10 ** self.tokens_data[self.tokens[name]]["decimals"]
-            return reth_rate
-        def get_proto_nominal_wsteth():
-            wsteth_rate_raw = self.wsteth_contract.functions.stEthPerToken().call()
-            wsteth_rate = wsteth_rate_raw / 10 ** self.tokens_data[self.tokens[name]]["decimals"]
-            return wsteth_rate
+        # def get_proto_nominal_reth():
+        #     reth_rate_raw = self.reth_contract.functions.getExchangeRate().call()
+        #     reth_rate = reth_rate_raw / 10 ** self.tokens_data[self.tokens[name]]["decimals"]
+        #     return reth_rate
+        # def get_proto_nominal_wsteth():
+        #     wsteth_rate_raw = self.wsteth_contract.functions.stEthPerToken().call()
+        #     wsteth_rate = wsteth_rate_raw / 10 ** self.tokens_data[self.tokens[name]]["decimals"]
+        #     return wsteth_rate
         
         if (name == 'USDC' or
             name == 'USDT' or
@@ -314,18 +351,25 @@ class ChainLink2:
             result = get_from_binance("ETH")
         elif name == 'rETH':
             step1 = get_from_binance("ETH")
-            step2 = get_proto_nominal_reth()
-            result = step1 * step2
+            # step2 = get_proto_nominal_reth()
+            result = step1 * 1.111
         elif name == 'wstETH':
             step1 = get_from_binance("ETH")
-            step2 = get_proto_nominal_wsteth()
-            result = step1 * step2
+            # step2 = get_proto_nominal_wsteth()
+            result = step1 * 1.226
+        elif name == 'weETH':
+            step1 = get_from_binance("ETH")
+            # step2 = get_proto_nominal_reth()
+            result = step1 * 1.111
+        elif name == 'sfrxETH':
+            step1 = get_from_binance("ETH")
+            # step2 = get_proto_nominal_reth()
+            result = step1 * 1.111
         else:
             result = get_from_binance(name)
 
         self.tokens_data[self.tokens[name]]["cex_price"] = result
         return result
-
 
     def scan_pool_statistic(self, interval_h, print_flag=False, use=''):
         dust_arbitrage_pools = {}
@@ -408,12 +452,45 @@ class ChainLink2:
                 b0_list = []
                 b1_list = []
                 apr_list = []
+                metric1_max_list = []
+                metric1_min_list = []
+                metric2_max_list = []
+                metric2_min_list = []
+                metric2_max_list = []
+                metric3_max_list = []
+                metric3_min_list = []
+
+     
+     
+                horizon = window = 24
+                k = 2.5
+                width_list = []
+                drift_list = []
+                dp_avr_add = self.make_avg(horizon)
+                prices_np = np.array(value["dex_price"])        # part for get vola moving values
+                for i in range(window, len(prices_np)):
+                    chunk = prices_np[i-window:i]               # how long is past window
+                    if np.any(chunk <= 0):
+                        width_list.append(0)
+                        drift_list.append(0)
+                        continue
+                    returns = np.diff(np.log(chunk))
+                    mu = np.mean(returns)
+                    sigma = np.std(returns)
+                    drift = (mu / (sigma + 1e-8)) * (np.cbrt(horizon))         # relative with zero devision protect
+                    drift_norm = np.tanh(drift)
+                    width_pct = k * (sigma ** (2/3)) * (np.cbrt(horizon)) 
+                    width_list.append(width_pct)
+                    drift_list.append(drift_norm)
+
+
                 gross0 = list(value["gross0"])
                 gross1 = list(value["gross1"])
-                for cp0, cp1, dp, l, g0, g0p, g1, g1p, b0, b1 in zip(value["cex_price0"], 
-                    value["cex_price1"], value["dex_price"], value["liquidity"], 
-                    gross0, gross0[1:], gross1, gross1[1:], 
-                    value["balance0"], value["balance1"]):          # rebuild lists for plot
+                gr_avrg = None
+                for cp0, cp1, dp, l, g0, g0p, g1, g1p, b0, b1, wdh, drf in zip(
+                        value["cex_price0"], value["cex_price1"], value["dex_price"], value["liquidity"], 
+                        gross0, [0] + gross0[:-1], gross1, [0] + gross1[:-1], value["balance0"], value["balance1"], 
+                        [0] * window + [0] + width_list, [0] * window + [0] + drift_list):
                     cp = cp0 / cp1 if cp1 > 0 else 0
                     if value["reversed"]:
                         dpw = 1 / dp if dp > 0 else 0
@@ -437,43 +514,103 @@ class ChainLink2:
                     gu = g0u + g1u
                     gr = (gu / bu * 100 * (24 / interval_h) * 365) if bu and interval_h else 0
                     if gr < 0 or gr > 200:
-                        print('debug' + str(gr) + str(gu) + str(bu) + str(interval_h))
-                    apr_list.append(gr)         # apr add
+                        print('debug' + str(gr) + " | " + str(g0) + " | " + str(g1) + " | " + str(g0p) + " | " + str(g1p) + " | " + str(l))
+                    gr_avrg = self.sma_calc(gr_avrg, gr, 7)
+                    apr_list.append(gr_avrg)         # apr add
+                    
+                    # Experemental metrics for future use - Metric group 1
+                    liq_scaled = l / 10**(abs(dec0 - dec1)) if dec0 and dec1 else 0
+                    s_p = math.sqrt(dpw) if dpw > 0 else 0
+                    bal0_norm = b0 * dpw
+                    bal1_norm = b1
+                    bal_total = bal0_norm + bal1_norm
+                    bal_not_in_use = bal0_norm - bal1_norm
+                    bal_working = min(bal0_norm, bal1_norm) * 2
+                    bal0_working = (bal_working / 2) / dpw if dpw > 0 else 0
+                    bal1_working = (bal_working / 2) if dpw > 0 else 0
+                    range1_offset = bal_not_in_use / bal_total if bal_total else 0              # calculation inputs prepared
+                    s_p_min = s_p - bal1_working / liq_scaled if liq_scaled else 0              # L formula for price range borders with working balance and liquidity
+                    s_p_max = (liq_scaled * s_p) / (liq_scaled - bal0_working * s_p) if liq_scaled and (liq_scaled - bal0_working * s_p) else 0
+                    s_delta1 = s_p_max - s_p_min                                                 # final values preparating
+                    s_p1_max_new = (s_p + s_delta1 * 0.5) + s_delta1 * 0.5 * range1_offset
+                    s_p1_min_new = (s_p - s_delta1 * 0.5) + s_delta1 * 0.5 * range1_offset
+                    metric1_teo_max = s_p1_max_new ** 2
+                    metric1_teo_min = s_p1_min_new ** 2
+                    metric1_max_list.append(metric1_teo_max)
+                    metric1_min_list.append(metric1_teo_min)
+                    
+                    # Experemental metrics for future use - Metric group 2
+                    s_delta2 = (s_p * b0 + b1) / liq_scaled if liq_scaled else 0
+                    s_p2_max_new = s_p + s_delta2 * 0.5                 # + s_delta * 0.5 * range1_offset
+                    s_p2_min_new = s_p - s_delta2 * 0.5                 # + s_delta * 0.5 * range1_offset
+                    metric2_teo_max = s_p2_max_new ** 2
+                    metric2_teo_min = s_p2_min_new ** 2
+                    metric2_max_list.append(metric2_teo_max)
+                    metric2_min_list.append(metric2_teo_min)
+
+                    # Experemental metrics for future use - Metric group 3
+                    if dpw > 0:
+                        dp_avr = dp_avr_add(dpw)
+                    else:
+                        dp_avr = 0
+                    center_shift = drf * wdh
+                    up_log = wdh + center_shift
+                    down_log = wdh - center_shift
+                    metric3_teo_max = dp_avr * np.exp(up_log)
+                    metric3_teo_min = dp_avr * np.exp(-down_log)
+                    metric3_max_list.append(metric3_teo_max)
+                    metric3_min_list.append(metric3_teo_min)
+
+
+
+
                 # ===== PLOT =====
                 x = range(len(dp_list))  # итерации
                 plt.style.use("dark_background")
                 fig, ax1 = plt.subplots(figsize=(18, 12))
                 # ===== AXIS 1: Prices =====
-                ax1.plot(x, dp_list, color="#22C049FF", label="DEX price", linewidth=1)
-                ax1.plot(x, cp_list, color="#6EFF4AFF", label="CEX price", linewidth=1)
+                ax1.plot(x, dp_list, color="#22C049FF", label="DEX price", linewidth=1.5)
+                ax1.plot(x, cp_list, color="#22C049FF", label="CEX price", linewidth=1.2, linestyle='--')
+                ax1.plot(x, metric1_max_list, color="#FBFF1BFF", label="Teo range 1", linewidth=1.2, linestyle=':')
+                ax1.plot(x, metric1_min_list, color="#FBFF1BFF", linewidth=1.2, linestyle=':')
+                ax1.plot(x, metric2_max_list, color="#DDB500FF", label="Teo range 2", linewidth=1.2, linestyle=':')
+                ax1.plot(x, metric2_min_list, color="#DDB500FF", linewidth=1.2, linestyle=':')
+                ax1.plot(x, metric3_max_list, color="#FF6030FF", label="Teo range 3", linewidth=1.2, linestyle=':')
+                ax1.plot(x, metric3_min_list, color="#FF6030FF", linewidth=1.2, linestyle=':')
                 ax1.set_ylabel("Price")
-                ax1.grid(True, linestyle="--", alpha=0.4)
+                ax1.set_xlim(0, len(dp_list))
+                ax1.grid(True, linestyle="--", alpha=0.25)
+                ax1.spines["top"].set_visible(False)
+                ax1.spines["right"].set_visible(False)
                 # ===== AXIS 2: APR =====
                 ax2 = ax1.twinx()
-                ax2.plot(x, apr_list, color="#FF2626FF", linewidth=1, label="APR")
+                ax2.plot(x, apr_list, color="#1DD7DD7D", linewidth=1, label="APR")
                 ax2.set_ylim(0, 200)
                 ax2.set_yticks([])
+                ax2.set_ylabel("")
                 ax2.spines["right"].set_visible(False)
                 # ===== AXIS 3: Balances (log scale) =====
                 ax3 = ax1.twinx()
-                ax3.plot(x, b0_list, color="#3BE8FFFF", linewidth=1, label="Balance 0")
-                ax3.plot(x, b1_list, color="#4797FFFF", linewidth=1, label="Balance 1")
+                ax3.plot(x, b0_list, color="#4753FFFF", linewidth=1.2, label="Balance 0")
+                ax3.plot(x, b1_list, color="#4753FFFF", linewidth=1.2, label="Balance 1", linestyle='--')
                 ax3.set_yscale("log")
                 ax3.set_ylim(1, 10**7)
                 ax3.set_yticks([])
+                ax3.set_ylabel("")
                 ax3.spines["right"].set_visible(False)
                 # ===== Legends =====
                 lines = ax1.get_lines() + ax2.get_lines() + ax3.get_lines()
                 labels = [l.get_label() for l in lines]
                 ax1.legend(lines, labels, loc="upper left")
                 fig.tight_layout()
-                plt.savefig("saves/" + sym0 + sym1 + str(fee) + ".png", dpi=200)
+                plt.savefig("saves/" + str(self.chain_id) + "_" + sym0 + "_" + sym1 + "_" + str(key[2]) + ".png", dpi=200)
                 plt.close()
 
         if use != 'Dust' and use != 'Work':
             self.dust_arbitrage_pools = dust_arbitrage_pools.copy()
             self.active_trade_pools = active_trade_pools.copy()
         # self.pools_data = pools.copy()
+
 
 
     # single pool agbitrage check
@@ -537,6 +674,7 @@ class ChainLink2:
                         used_fee = key[2]
                     else:
                         break
+                    time.sleep(0.5)     # for avoid too many requests in short time
                 if max_search > 0.02:
                     print('====================> OK', max_search)
                     self.found_best_sub_arb_swaps(token_main_arb_in, token_main_arb_out, amm_main_arb_in, amm_main_arb_out, used_fee)
@@ -562,6 +700,7 @@ class ChainLink2:
                         used_fee = key[2]
                     else:
                         break
+                    time.sleep(0.5)     # for avoid too many requests in short time
                 if max_search > 0.02:
                     print('====================> OK', max_search)
                     self.found_best_sub_arb_swaps(token_main_arb_in, token_main_arb_out, amm_main_arb_in, amm_main_arb_out, used_fee)
@@ -597,6 +736,7 @@ class ChainLink2:
                             print('debug by Q', fee, amm_start, 'more better data') 
                     else:
                         print('debug by Q', fee, amm_start, 'not valid data') 
+                    time.sleep(0.5)     # for avoid too many requests in short time
 
             if reference_token != token_main_arb_out:       # is post swap needed?
                 for fee in self.pools_fee:
@@ -617,6 +757,7 @@ class ChainLink2:
                             print('debug by I', fee, amm_finish, 'more better data') 
                     else:
                         print('debug by I', fee, amm_finish, 'not valid data') 
+                    time.sleep(0.5)     # for avoid too many requests in short time
 
             if amm_start and amm_finish:
                 diff_netto = amm_finish - amm_start
@@ -692,100 +833,62 @@ class ChainLink2:
 
 
 
-    
+    ''' Sayety wraped requests to rpc '''
 
+    @classmethod
+    def get_balance_token(cls, token_cntr, target_addr, dec):
+        balance_row = cls.safe_call(
+        lambda: token_cntr.functions.balanceOf(
+            target_addr
+        ).call())
+        balance = balance_row / 10**dec
+        return balance
 
-    @staticmethod
-    def get_balance_token(token_cntr, target_addr, dec, retries=5, delay=5):
-        for attempt in range(retries):
-            try:
-                balance_row = token_cntr.functions.balanceOf(target_addr).call()
-            except (BadResponseFormat, Web3Exception) as e:
-                print(f"[{attempt+1}/{retries}] Web3 error: {e}")
-                time.sleep(delay)
-            except Exception as e:
-                print(f"[{attempt+1}/{retries}] Unexpected error: {e}")
-                time.sleep(delay)
-            else:
-                balance = balance_row / 10**dec
-                return balance
-        return 0
+    @classmethod
+    def get_slot_data(cls, pool_cntr, dec0, dec1):
+        slot0 = cls.safe_call(
+            lambda: pool_cntr.functions.slot0().call())
+        sqrtPriceX96 = slot0[0]
+        price = (sqrtPriceX96 / 2**96) ** 2
+        price_scaled = price * 10**(dec0 - dec1)
+        current_tick = slot0[1]
+        return price_scaled, current_tick
 
+    @classmethod
+    def get_liquidity(cls, pool_cntr, dec0, dec1):
+        l_row = cls.safe_call(
+            lambda: pool_cntr.functions.liquidity().call())
+        row_fee0 = cls.safe_call(
+            lambda: pool_cntr.functions.feeGrowthGlobal0X128().call())
+        row_fee1 = cls.safe_call(
+            lambda: pool_cntr.functions.feeGrowthGlobal1X128().call())
+        fee0_real = row_fee0 / 2**128
+        fee1_real = row_fee1 / 2**128
+        fee0 = fee0_real / 10**dec0
+        fee1 = fee1_real / 10**dec1
+        return l_row, fee0, fee1
 
-    @staticmethod
-    def get_slot_data(pool_cntr, dec0, dec1, retries=5, delay=5):
-        for attempt in range(retries):
-            try:
-                slot0 = pool_cntr.functions.slot0().call()
-            except (BadResponseFormat, Web3Exception) as e:
-                print(f"[{attempt+1}/{retries}] Web3 error: {e}")
-                time.sleep(delay)
-            except Exception as e:
-                print(f"[{attempt+1}/{retries}] Unexpected error: {e}")
-                time.sleep(delay)
-            else:
-                sqrtPriceX96 = slot0[0]
-                price = (sqrtPriceX96 / 2**96) ** 2
-                price_scaled = price * 10**(dec0 - dec1)
-                current_tick = slot0[1]
-                return price_scaled, current_tick
-        return 0, 0
-
-
-    @staticmethod
-    def get_liquidity(pool_cntr, dec0, dec1, retries=5, delay=5):
-        for attempt in range(retries):    
-            try:
-                l_row = pool_cntr.functions.liquidity().call()
-                row_fee0 = pool_cntr.functions.feeGrowthGlobal0X128().call()
-                row_fee1 = pool_cntr.functions.feeGrowthGlobal1X128().call()
-            except (BadResponseFormat, Web3Exception) as e:
-                print(f"[{attempt+1}/{retries}] Web3 error: {e}")
-                time.sleep(delay)
-            except Exception as e:
-                print(f"[{attempt+1}/{retries}] Unexpected error: {e}")
-                time.sleep(delay)
-            else:      
-                fee0_real = row_fee0 / 2**128
-                fee1_real = row_fee1 / 2**128
-                fee0 = fee0_real / 10**dec0
-                fee1 = fee1_real / 10**dec1
-                return l_row, fee0, fee1
-            return 0, 0, 0
-
-
-    @staticmethod
-    def get_swap_ammount_quoter(quoter_cntr, token_in, token_out, dec_in, dec_out, fee, amount, exact='I'):
+    @classmethod
+    def get_swap_ammount_quoter(cls, quoter_cntr, token_in, token_out, dec_in, dec_out, fee, amount, exact='I'):
         if exact == 'I':
             amount_scaled = int(amount * (10 ** dec_in))
-        elif exact == 'Q':
-            amount_scaled = int(amount * (10 ** dec_out))
-        else: return None
-        try:
-            if exact == 'I':
-                amount_row = quoter_cntr.functions.quoteExactInputSingle(
-                token_in, token_out, fee, amount_scaled, 0
-                ).call()
-            elif exact == 'Q':
-                amount_row = quoter_cntr.functions.quoteExactOutputSingle(
-                token_in, token_out, fee, amount_scaled, 0
-                ).call()
-            else: return None
-        except ContractLogicError:
-            print('EVM revert')
-            return None
-        except Web3RPCError as e:
-            print('RPC error:', e)
-            return None
-        except ValueError as e:
-            print('ValueError:', e)
-            return None
-        if exact == 'I':
+            amount_row = cls.safe_call(
+                lambda: quoter_cntr.functions.quoteExactInputSingle(
+                    token_in, token_out, fee, amount_scaled, 0
+                ).call())
             ammount_norm = amount_row / (10 ** dec_out)
         elif exact == 'Q':
+            amount_scaled = int(amount * (10 ** dec_out))
+            amount_row = cls.safe_call(
+                lambda: quoter_cntr.functions.quoteExactOutputSingle(
+                    token_in, token_out, fee, amount_scaled, 0
+                ).call())
             ammount_norm = amount_row / (10 ** dec_in)
         else: return None
         return ammount_norm
+
+
+
 
 
 
@@ -896,9 +999,47 @@ class ChainLink2:
 
 
 
+    ''' HELPERS '''
+
+    def resolve_pool_key(self, pools, token_sym0, token_sym1, fee):
+        token_addr0 = self.tokens[token_sym0]
+        token_addt1 = self.tokens[token_sym1]
+        key = (token_addr0, token_addt1, fee) if token_addr0.lower() < token_addt1.lower() else (token_addt1, token_addr0, fee)
+        value = pools.get(key)
+        return key, value
 
 
+    @staticmethod
+    def safe_call(fn, retries=6, delay=6):
+        for attempt in range(retries):
+            try:
+                return fn()
+            except Web3RPCError as e:
+                print(f"[RPC retry {attempt+1}] {e}")
+            except Exception as e:
+                print(f"[Error retry {attempt+1}] {e}")
+            if attempt < retries - 1:
+                time.sleep(delay * (2 ** attempt))
+        return 0
 
+    @staticmethod
+    def make_avg(window_size):
+        values = deque(maxlen=window_size)
+        def add(x):
+            if x is not None:
+                values.append(x)
+            return sum(values) / len(values) if values else None
+        return add
+
+    @staticmethod
+    def sma_calc(prev_sma, new_value, period):
+        if prev_sma is None:
+            return new_value
+        if period <= 1:
+            period = 1
+        alpha = 1 / period
+        new_sma = (1 - alpha) * prev_sma + alpha * new_value
+        return new_sma
 
 
 

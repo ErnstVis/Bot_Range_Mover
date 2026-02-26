@@ -17,6 +17,12 @@ def main():
         default='scanner',
         help="bot mode, pools scanner or watchdog",
     )
+    parser.add_argument(
+        "--chain",
+        type=str,
+        default='mainnet',
+        help="bot operating blockchain",
+    )
     args = parser.parse_args()
     if args.mode == 'scanner':
         bot_mode = 0
@@ -29,31 +35,30 @@ def main():
         return
 
 
-    chain = ChainLink2('polygon', 'uni3')
-    cycles = 1
+    chain = ChainLink2(args.chain, 'uni3')
+    cycles = 0
 
     chain.scan_tokens(short=bot_mode)
     chain.scan_pools()
+    chain.scan_pool_statistic(1)
 
     if not bot_mode:
         while True:
-            print_flag = cycles % 12 == 0
+            print_flag = cycles % 24 == 0
             print('\nScan', cycles, 'starts', datetime.now())
-            if cycles == 1:
-                chain.scan_pool_statistic(2)
-            else:
-                chain.scan_pool_statistic(2, print_flag, use='Dust')
-                print()
-                chain.scan_pool_statistic(2, print_flag, use='Work')
-            chain.check_arbitrage_possibilities()
-            time.sleep(7200)
+            chain.scan_pool_statistic(1, print_flag, use='Dust')
+            print()
+            chain.scan_pool_statistic(1, print_flag, use='Work')
+            # chain.check_arbitrage_possibilities()
+            time.sleep(3600)
             cycles += 1
 
     elif bot_mode == 1:
-        chain.scan_pool_statistic(2)
+        chain.scan_pool_statistic(1)
     
     elif bot_mode == 2:
         chain.manual_swap_1()
+        return
 
     else:
         return
@@ -62,10 +67,12 @@ def main():
         tasks = []
 
         for base, quote, fee in [
-            ('ETH', 'wETH', 3000),
-            ('ETH', 'wETH', 500),
-            ('wETH', 'USDT', 3000),
-            ('wETH', 'DAI', 3000),
+            ('ETH', 'weETH', 100),
+            ('ETH', 'weETH', 500),
+            ('ETH', 'weETH', 3000),
+            ('ETH', 'rETH', 100),
+            ('ETH', 'rETH', 500),
+            ('ETH', 'rETH', 3000),
         ]:
         
             key, value = chain.resolve_pool_key(chain.pools_data, base, quote, fee)

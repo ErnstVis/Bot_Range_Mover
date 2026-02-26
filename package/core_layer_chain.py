@@ -337,7 +337,7 @@ class ChainLink:
         return None
 
 
-    def get_liquidity(self, tick=None, fee=None, retries=60, delay=5):
+    def get_liquidity(self, tick=None, fee=None, retries=5, delay=60):
         if fee is None:
             fee = self.L_fee
         pool = self.pools.get(fee)
