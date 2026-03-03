@@ -8,6 +8,7 @@ import time
 import os
 import math
 import json
+import logging
 from datetime import datetime, timezone
 import random
 import sys
@@ -20,6 +21,12 @@ import websockets
 from websockets.exceptions import ConnectionClosedError
 
 sys.stdout.reconfigure(encoding="utf-8")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
 class ChainLink2:
@@ -118,81 +125,86 @@ class ChainLink2:
         sym0 = self.tokens_data[key[0]]["cex_name"]
         sym1 = self.tokens_data[key[1]]["cex_name"]
         fee = str(key[2])
-        while True:
-            try:
-                async with AsyncWeb3(
-                    WebSocketProvider(self.rpcws + self.key_rpc)
-                ) as w3:
-                    pool = w3.eth.contract(address=addr, abi=self.abi_pool)
-                    await w3.eth.subscribe(
-                        "logs",
-                        {"address": addr}
-                    )
-                    async for msg in w3.socket.process_subscriptions():
-                        log = msg.get("result")
-                        if not log:
-                            continue
-                        ts = datetime.now()
-                        try:
-                            event = pool.events.Swap().process_log(log)                    
-                            a0 = event["args"]["amount0"] / 10**dec0
-                            a1 = event["args"]["amount1"] / 10**dec1
-                            sqrt_price = event["args"]["sqrtPriceX96"]
-                            dex_price = ( (sqrt_price / 2**96) ** 2 * 10**dec0 / 10**dec1 )
-                            swap_price = abs(a1 / a0) if a0 and a1 else 0
-                            print(
-                                f"[{ts}]\t {sym0} / {sym1} / {fee} "
-                                f"\ta0= {a0:.6f} \ta1= {a1:.6f} "
-                                f"\tswap price= {swap_price:.5f}"
-                                f"\tact price= {dex_price:.5f}")
 
-                                                                    # test part
-                            await asyncio.to_thread(
-                                self.check_fast_data(key, value, a0, a1, swap_price, dex_price))
-                            
-                            continue
-                        except:
-                            pass
-                        try:
-                            event = pool.events.Mint().process_log(log)
-                            a0 = event["args"]["amount0"] / 10**dec0
-                            a1 = event["args"]["amount1"] / 10**dec1
-                            args = event["args"]
-                            print(
-                                f"MINT "
-                                f"[{ts}]\t {sym0} / {sym1} / {fee} "
-                                f"range=[{args['tickLower']}, {args['tickUpper']}] "
-                                f"liq={args['amount']} "
-                                f"\ta0={a0:.6f} \ta1={a1:.6f} "
-                            )
-                            continue
-                        except:
-                            pass
-                        try:
-                            event = pool.events.Burn().process_log(log)
-                            a0 = event["args"]["amount0"] / 10**dec0
-                            a1 = event["args"]["amount1"] / 10**dec1
-                            args = event["args"]
-                            print(
-                                f"BURN "
-                                f"[{ts}]\t {sym0} / {sym1} / {fee} "
-                                f"range=[{args['tickLower']}, {args['tickUpper']}] "
-                                f"liq={args['amount']} "
-                                f"\ta0={a0:.6f} \ta1={a1:.6f} "
-                            )
-                            continue
-                        except:
-                            pass
-            except (
-                asyncio.IncompleteReadError,
-                websockets.exceptions.ConnectionClosedError,
-                ConnectionError,
-            ) as e:
-                print(f"[WS] {sym0} / {sym1} / {fee} reconnect:", e)
-                await asyncio.sleep(2)
-            except Exception as e:
-                print(f"[FATAL] listener {sym0} / {sym1} / {fee}:", e)
-                await asyncio.sleep(5)
+        swap_topic = Web3.keccak(text="Swap(address,address,int256,int256,uint160,uint128,int24)").hex()
+        mint_topic = Web3.keccak(text="Mint(address,address,int24,int24,uint128,uint256,uint256)").hex()
+        burn_topic = Web3.keccak(text="Burn(address,int24,int24,uint128,uint256,uint256)").hex()
+
+        event_dispatcher = {
+            swap_topic: ("SWAP", lambda pool, log: pool.events.Swap().process_log(log)),
+            mint_topic: ("MINT", lambda pool, log: pool.events.Mint().process_log(log)),
+            burn_topic: ("BURN", lambda pool, log: pool.events.Burn().process_log(log)),
+        }
+
+        while True:
+            async with AsyncWeb3(
+                WebSocketProvider(self.rpcws + self.key_rpc)
+            ) as w3:
+                pool = w3.eth.contract(address=addr, abi=self.abi_pool)
+                await w3.eth.subscribe(
+                    "logs",
+                    {"address": addr}
+                )
+                async for msg in w3.socket.process_subscriptions():
+                    log = msg.get("result")
+                    if not log:
+                        continue
+
+                    topics = log.get("topics", [])
+                    if not topics:
+                        continue
+
+                    topic0 = topics[0]
+                    if isinstance(topic0, bytes):
+                        topic0 = topic0.hex()
+                    if isinstance(topic0, str) and not topic0.startswith("0x"):
+                        topic0 = f"0x{topic0}"
+
+                    if topic0 not in event_dispatcher:
+                        continue
+
+                    event_name, parser = event_dispatcher[topic0]
+                    event = parser(pool, log)
+                    ts = datetime.now()
+
+                    if event_name == "SWAP":
+                        a0 = event["args"]["amount0"] / 10**dec0
+                        a1 = event["args"]["amount1"] / 10**dec1
+                        sqrt_price = event["args"]["sqrtPriceX96"]
+                        dex_price = ((sqrt_price / 2**96) ** 2 * 10**dec0 / 10**dec1)
+                        swap_price = abs(a1 / a0) if a0 and a1 else 0
+                        swap_msg = (
+                            f"[{ts}]\t {sym0} / {sym1} / {fee} "
+                            f"\ta0= {a0:.6f} \ta1= {a1:.6f} "
+                            f"\tswap price= {swap_price:.5f}"
+                            f"\tact price= {dex_price:.5f}"
+                        )
+                        print(swap_msg)
+                        logger.info(swap_msg)
+                        await asyncio.to_thread(
+                            self.check_fast_data,
+                            key,
+                            value,
+                            a0,
+                            a1,
+                            swap_price,
+                            dex_price,
+                        )
+                        continue
+
+                    a0 = event["args"]["amount0"] / 10**dec0
+                    a1 = event["args"]["amount1"] / 10**dec1
+                    args = event["args"]
+                    pool_event_msg = (
+                        f"{event_name} "
+                        f"[{ts}]\t {sym0} / {sym1} / {fee} "
+                        f"range=[{args['tickLower']}, {args['tickUpper']}] "
+                        f"liq={args['amount']} "
+                        f"\ta0={a0:.6f} \ta1={a1:.6f} "
+                    )
+                    print(pool_event_msg)
+                    logger.info(pool_event_msg)
+                    continue
 
 
 
