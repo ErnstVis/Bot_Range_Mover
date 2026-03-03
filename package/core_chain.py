@@ -18,6 +18,8 @@ import asyncio
 from asyncio.exceptions import IncompleteReadError
 import websockets
 from websockets.exceptions import ConnectionClosedError
+import logging
+import os
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -91,6 +93,8 @@ class ChainLink2:
             "ETH": self.tokens["ETH"],
             "weETH": self.tokens["weETH"],
             "rETH": self.tokens["rETH"],
+            "rsETH": self.tokens["rsETH"],
+            "ezETH": self.tokens["ezETH"],
             "wstETH": self.tokens["wstETH"],
         }
 
@@ -109,6 +113,28 @@ class ChainLink2:
 
 
 
+    @staticmethod
+    def get_pool_logger(pool_name: str):
+        logger = logging.getLogger(pool_name)
+        if logger.handlers:
+            return logger
+        logger.setLevel(logging.INFO)
+        os.makedirs("logs", exist_ok=True)
+        handler = logging.FileHandler(
+            f"logs/{pool_name}.log",
+            mode="a",           # append
+            encoding="utf-8")
+        formatter = logging.Formatter(
+            "%(asctime)s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S")
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.propagate = False
+        return logger
+
+
+
+
     ''' ASYNC FNS '''
 
     async def listener(self, key, value):
@@ -118,71 +144,111 @@ class ChainLink2:
         sym0 = self.tokens_data[key[0]]["cex_name"]
         sym1 = self.tokens_data[key[1]]["cex_name"]
         fee = str(key[2])
+        prv_ts = datetime.now()
+        pool_name = f"{sym0}_{sym1}_{fee}"
+        logger = self.get_pool_logger(pool_name)
         while True:
             try:
-                async with AsyncWeb3(
-                    WebSocketProvider(self.rpcws + self.key_rpc)
-                ) as w3:
-                    pool = w3.eth.contract(address=addr, abi=self.abi_pool)
-                    await w3.eth.subscribe(
-                        "logs",
-                        {"address": addr}
-                    )
-                    async for msg in w3.socket.process_subscriptions():
-                        log = msg.get("result")
-                        if not log:
-                            continue
-                        ts = datetime.now()
-                        try:
-                            event = pool.events.Swap().process_log(log)                    
-                            a0 = event["args"]["amount0"] / 10**dec0
-                            a1 = event["args"]["amount1"] / 10**dec1
-                            sqrt_price = event["args"]["sqrtPriceX96"]
-                            dex_price = ( (sqrt_price / 2**96) ** 2 * 10**dec0 / 10**dec1 )
-                            swap_price = abs(a1 / a0) if a0 and a1 else 0
-                            print(
-                                f"[{ts}]\t {sym0} / {sym1} / {fee} "
-                                f"\ta0= {a0:.6f} \ta1= {a1:.6f} "
-                                f"\tswap price= {swap_price:.5f}"
-                                f"\tact price= {dex_price:.5f}")
+                w3 = AsyncWeb3(WebSocketProvider(self.rpcws + self.key_rpc))
+                await w3.__aenter__()
+                pool = w3.eth.contract(address=addr, abi=self.abi_pool)
+                await w3.eth.subscribe("logs", {"address": addr})
+                async for msg in w3.socket.process_subscriptions():
+                    log = msg.get("result")
+                    if not log:
+                        continue
+                    ts = datetime.now()
+                    try:
+                        event = pool.events.Swap().process_log(log)     
+                        args = event["args"]
+                        a0 = args["amount0"] / 10**dec0
+                        a1 = args["amount1"] / 10**dec1           
+                        sqrt_price = args["sqrtPriceX96"]
+                        dex_price = ( (sqrt_price / 2**96) ** 2 * 10**dec0 / 10**dec1 )
+                        swap_price = abs(a1 / a0) if a0 and a1 else 0
+                        if (ts - prv_ts).total_seconds() > 10:
+                            logger.info("----------------")
+                        logger.info(
+                            f"SWAP - "
+                            f"{sym0} / {sym1} / {fee}"
+                            f"\t\ta0= {a0:.6f}\ta1= {a1:.6f}\t\t"
+                            f"act price= {dex_price:.5f}"
+                            #f"\tswap price= {swap_price:.5f}"
+                        )
+                        print(
+                            f"SWAP - "
+                            f"[{ts}]\t {sym0} / {sym1} / {fee} "
+                            f"\ta0= {a0:.6f} \ta1= {a1:.6f} \t"
+                            f"act price= {dex_price:.5f}"
+                            #f"\tswap price= {swap_price:.5f}"
+                        )
+                        prv_ts = ts
+                        print("debug", id(value), id(self.pools_data[key]))
 
-                                                                    # test part
-                            await asyncio.to_thread(
-                                self.check_fast_data(key, value, a0, a1, swap_price, dex_price))
-                            
-                            continue
-                        except:
-                            pass
-                        try:
-                            event = pool.events.Mint().process_log(log)
-                            a0 = event["args"]["amount0"] / 10**dec0
-                            a1 = event["args"]["amount1"] / 10**dec1
-                            args = event["args"]
-                            print(
-                                f"MINT "
-                                f"[{ts}]\t {sym0} / {sym1} / {fee} "
-                                f"range=[{args['tickLower']}, {args['tickUpper']}] "
-                                f"liq={args['amount']} "
-                                f"\ta0={a0:.6f} \ta1={a1:.6f} "
-                            )
-                            continue
-                        except:
-                            pass
-                        try:
-                            event = pool.events.Burn().process_log(log)
-                            a0 = event["args"]["amount0"] / 10**dec0
-                            a1 = event["args"]["amount1"] / 10**dec1
-                            args = event["args"]
-                            print(
-                                f"BURN "
-                                f"[{ts}]\t {sym0} / {sym1} / {fee} "
-                                f"range=[{args['tickLower']}, {args['tickUpper']}] "
-                                f"liq={args['amount']} "
-                                f"\ta0={a0:.6f} \ta1={a1:.6f} "
-                            )
-                            continue
-                        except:
-                            pass
+                        # dyn act part
+                        await asyncio.to_thread(
+                            self.check_fast_data,
+                            key, value, a0, a1, swap_price, dex_price
+                        )
+                        continue
+                    except Exception as e:
+                        logger.warning(f"Swap parse failed: {e}, log={log}")
+                    try:
+                        event = pool.events.Mint().process_log(log)
+                        args = event["args"]
+                        a0 = args["amount0"] / 10**dec0
+                        a1 = args["amount1"] / 10**dec1
+                        lower_tick = 1.0001 ** args["tickLower"]
+                        upper_tick = 1.0001 ** args["tickUpper"]
+                        liq_am = args["amount"]
+                        if (ts - prv_ts).total_seconds() > 10:
+                            logger.info("----------------")
+                        logger.info(
+                            f"MINT - "
+                            f"{sym0} / {sym1} / {fee}"
+                            f"\t\ta0={a0:.6f} \ta1={a1:.6f}\t\t"
+                            f"range=[{lower_tick:.6f}, {upper_tick:.6f}] "
+                            #f"liq={liq_am} "
+                        )
+                        print(
+                            f"MINT - "
+                            f"[{ts}]\t {sym0} / {sym1} / {fee} "
+                            f"\ta0={a0:.6f} \ta1={a1:.6f} \t"
+                            f"range=[{lower_tick:.6f}, {upper_tick:.6f}] "
+                            #f"liq={liq_am} "
+                        )
+                        prv_ts = ts
+                        continue
+                    except Exception as e:
+                        logger.warning(f"Mint parse failed: {e}, log={log}")
+                    try:
+                        event = pool.events.Burn().process_log(log)
+                        args = event["args"]
+                        a0 = args["amount0"] / 10**dec0
+                        a1 = args["amount1"] / 10**dec1
+                        lower_tick = 1.0001 ** args["tickLower"]
+                        upper_tick = 1.0001 ** args["tickUpper"]
+                        liq_am = args["amount"]
+                        if (ts - prv_ts).total_seconds() > 10:
+                            logger.info("----------------")
+                        logger.info(
+                            f"BURN - "
+                            f"{sym0} / {sym1} / {fee}"
+                            f"\t\ta0={a0:.6f} \ta1={a1:.6f}\t\t"
+                            f"range=[{lower_tick:.6f}, {upper_tick:.6f}] "
+                            #f"liq={liq_am} "
+                        )
+                        print(
+                            f"BURN - "
+                            f"[{ts}]\t {sym0} / {sym1} / {fee} "
+                            f"\ta0={a0:.6f} \ta1={a1:.6f} \t"
+                            f"range=[{lower_tick:.6f}, {upper_tick:.6f}] "
+                            #f"liq={liq_am} "
+                        )
+                        prv_ts = ts
+                        continue
+                    except Exception as e:
+                        logger.warning(f"Burn parse failed: {e}, log={log}")
             except (
                 asyncio.IncompleteReadError,
                 websockets.exceptions.ConnectionClosedError,
@@ -358,6 +424,14 @@ class ChainLink2:
             # step2 = get_proto_nominal_wsteth()
             result = step1 * 1.226
         elif name == 'weETH':
+            step1 = get_from_binance("ETH")
+            # step2 = get_proto_nominal_reth()
+            result = step1 * 1.111
+        elif name == 'ezETH':
+            step1 = get_from_binance("ETH")
+            # step2 = get_proto_nominal_reth()
+            result = step1 * 1.111
+        elif name == 'rsETH':
             step1 = get_from_binance("ETH")
             # step2 = get_proto_nominal_reth()
             result = step1 * 1.111
