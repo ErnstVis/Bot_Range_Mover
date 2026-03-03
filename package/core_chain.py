@@ -19,6 +19,8 @@ import asyncio
 from asyncio.exceptions import IncompleteReadError
 import websockets
 from websockets.exceptions import ConnectionClosedError
+import logging
+import os
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -98,6 +100,8 @@ class ChainLink2:
             "ETH": self.tokens["ETH"],
             "weETH": self.tokens["weETH"],
             "rETH": self.tokens["rETH"],
+            "rsETH": self.tokens["rsETH"],
+            "ezETH": self.tokens["ezETH"],
             "wstETH": self.tokens["wstETH"],
         }
 
@@ -113,6 +117,28 @@ class ChainLink2:
         
         self.pools_data = {}
         self.combinations_starts = 0
+
+
+
+    @staticmethod
+    def get_pool_logger(pool_name: str):
+        logger = logging.getLogger(pool_name)
+        if logger.handlers:
+            return logger
+        logger.setLevel(logging.INFO)
+        os.makedirs("logs", exist_ok=True)
+        handler = logging.FileHandler(
+            f"logs/{pool_name}.log",
+            mode="a",           # append
+            encoding="utf-8")
+        formatter = logging.Formatter(
+            "%(asctime)s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S")
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.propagate = False
+        return logger
+
 
 
 
@@ -370,6 +396,14 @@ class ChainLink2:
             # step2 = get_proto_nominal_wsteth()
             result = step1 * 1.226
         elif name == 'weETH':
+            step1 = get_from_binance("ETH")
+            # step2 = get_proto_nominal_reth()
+            result = step1 * 1.111
+        elif name == 'ezETH':
+            step1 = get_from_binance("ETH")
+            # step2 = get_proto_nominal_reth()
+            result = step1 * 1.111
+        elif name == 'rsETH':
             step1 = get_from_binance("ETH")
             # step2 = get_proto_nominal_reth()
             result = step1 * 1.111
