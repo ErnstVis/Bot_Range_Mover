@@ -200,12 +200,12 @@ class ChainLink2:
                         dex_price = ((sqrt_price / 2**96) ** 2 * 10**dec0 / 10**dec1)
                         swap_price = abs(a1 / a0) if a0 and a1 else 0
                         swap_msg = (
-                            f"[{ts}]\t {sym0} / {sym1} / {fee} "
+                            f"{sym0} / {sym1} / {fee}"
                             f"\ta0= {a0:.6f} \ta1= {a1:.6f} "
                             f"\tswap price= {swap_price:.5f}"
                             f"\tact price= {dex_price:.5f}"
                         )
-                        print(swap_msg)
+                        print(f"[{ts}]\t{swap_msg}")
                         logger.info(swap_msg)
                         await asyncio.to_thread(
                             self.check_fast_data,
@@ -223,12 +223,12 @@ class ChainLink2:
                     args = event["args"]
                     pool_event_msg = (
                         f"{event_name} "
-                        f"[{ts}]\t {sym0} / {sym1} / {fee} "
+                        f"{sym0} / {sym1} / {fee}"
                         f"range=[{args['tickLower']}, {args['tickUpper']}] "
                         f"liq={args['amount']} "
                         f"\ta0={a0:.6f} \ta1={a1:.6f} "
                     )
-                    print(pool_event_msg)
+                    print(f"[{ts}]\t{pool_event_msg}")
                     logger.info(pool_event_msg)
                     continue
 
