@@ -1,8 +1,10 @@
-from dotenv import load_dotenv
 from web3 import Web3, AsyncWeb3
 from web3.exceptions import TimeExhausted
 from web3.providers.persistent import WebSocketProvider, AsyncIPCProvider
 from web3.exceptions import Web3Exception, TimeExhausted, BadResponseFormat, ContractLogicError, Web3RPCError
+from web3._utils.events import event_abi_to_log_topic
+
+from dotenv import load_dotenv
 import requests
 import time
 import os
@@ -19,7 +21,6 @@ import asyncio
 from asyncio.exceptions import IncompleteReadError
 import websockets
 from websockets.exceptions import ConnectionClosedError
-import logging
 import os
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -98,6 +99,7 @@ class ChainLink2:
 
         self.tokens_short = {
             "ETH": self.tokens["ETH"],
+            # "USDC": self.tokens["USDC"],
             "weETH": self.tokens["weETH"],
             "rETH": self.tokens["rETH"],
             "rsETH": self.tokens["rsETH"],
@@ -132,8 +134,7 @@ class ChainLink2:
             mode="a",           # append
             encoding="utf-8")
         formatter = logging.Formatter(
-            "%(asctime)s | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S")
+            "%(asctime)s | %(message)s")
         handler.setFormatter(formatter)
         logger.addHandler(handler)
         logger.propagate = False
@@ -145,6 +146,139 @@ class ChainLink2:
     ''' ASYNC FNS '''
 
     async def listener(self, key, value):
+        """Backward-compatible single-pool listener.
+
+        Uses the shared multi-pool websocket listener under the hood to avoid
+        opening a dedicated websocket connection per pool.
+        """
+        await self.listener_many([(key, value)])
+
+    async def listener_many(self, pool_items):
+        """Listen many pool subscriptions through one websocket connection."""
+        if not pool_items:
+            logger.warning("listener_many called with empty pool list")
+            return
+
+        def normalize_topic(topic):
+            if isinstance(topic, bytes):
+                topic = topic.hex()
+            topic = str(topic)
+            if not topic.startswith("0x"):
+                topic = f"0x{topic}"
+            return topic.lower()
+
+        pool_ctx = {}
+        for key, value in pool_items:
+            addr = Web3.to_checksum_address(value["address"])
+            sym0 = self.tokens_data[key[0]]["cex_name"]
+            sym1 = self.tokens_data[key[1]]["cex_name"]
+            fee = str(key[2])
+            pool_name = f"{sym0}_{sym1}_{fee}_{addr[:10]}".replace("/", "_")
+            pool_ctx[addr] = {
+                "key": key,
+                "value": value,
+                "dec0": self.tokens_data[key[0]]["decimals"],
+                "dec1": self.tokens_data[key[1]]["decimals"],
+                "sym0": sym0,
+                "sym1": sym1,
+                "fee": fee,
+                "pool_logger": self.get_pool_logger(pool_name),
+            }
+
+        while True:
+            try:
+                async with AsyncWeb3(WebSocketProvider(self.rpcws + self.key_rpc)) as w3:
+                    for addr, ctx in pool_ctx.items():
+                        ctx["pool"] = w3.eth.contract(address=addr, abi=self.abi_pool)
+
+                        swap_event = ctx["pool"].events.Swap()
+                        mint_event = ctx["pool"].events.Mint()
+                        burn_event = ctx["pool"].events.Burn()
+                        ctx["event_dispatcher"] = {
+                            normalize_topic(event_abi_to_log_topic(swap_event.abi)): ("SWAP", swap_event.process_log),
+                            normalize_topic(event_abi_to_log_topic(mint_event.abi)): ("MINT", mint_event.process_log),
+                            normalize_topic(event_abi_to_log_topic(burn_event.abi)): ("BURN", burn_event.process_log),
+                        }
+
+                        sub_id = await w3.eth.subscribe("logs", {"address": addr})
+                        logger.info("Subscribed pool %s (%s)", addr, sub_id)
+
+                    async for msg in w3.socket.process_subscriptions():
+                        log = msg.get("result")
+                        if not log:
+                            continue
+
+                        log_addr = log.get("address")
+                        if not log_addr:
+                            continue
+                        log_addr = Web3.to_checksum_address(log_addr)
+                        ctx = pool_ctx.get(log_addr)
+                        if not ctx:
+                            continue
+
+                        topics = log.get("topics", [])
+                        if not topics:
+                            continue
+
+                        topic0 = normalize_topic(topics[0])
+                        event_route = ctx["event_dispatcher"].get(topic0)
+                        if not event_route:
+                            continue
+
+                        event_name, parser = event_route
+                        event = parser(log)
+                        ts = datetime.now()
+
+                        if event_name == "SWAP":
+                            a0 = event["args"]["amount0"] / 10**ctx["dec0"]
+                            a1 = event["args"]["amount1"] / 10**ctx["dec1"]
+                            sqrt_price = event["args"]["sqrtPriceX96"]
+                            dex_price = ((sqrt_price / 2**96) ** 2 * 10**ctx["dec0"] / 10**ctx["dec1"])
+                            swap_price = abs(a1 / a0) if a0 and a1 else 0
+                            swap_msg = (
+                                f"{event_name}\t\t"
+                                f"{ctx['sym0']:<6} / {ctx['sym1']:<6} / {ctx['fee']:<5} "
+                                f"\t\ta0= {a0:>13.6f}\t\ta1= {a1:>13.6f}\t\t"
+                                f"act= {dex_price:>11.6f}"
+                            )
+                            ctx["pool_logger"].info(swap_msg)
+                            # await asyncio.to_thread(
+                            #     self.check_fast_data,
+                            #     ctx["key"],
+                            #     ctx["value"],
+                            #     a0,
+                            #     a1,
+                            #     swap_price,
+                            #     dex_price,
+                            # )
+                            continue
+
+                        a0 = event["args"]["amount0"] / 10**ctx["dec0"]
+                        a1 = event["args"]["amount1"] / 10**ctx["dec1"]
+                        tick_lo = event["args"]["tickLower"]
+                        tick_hi = event["args"]["tickUpper"]
+                        tick_delta = tick_hi - tick_lo
+                        range_min = 1.0001 ** tick_lo * (10**ctx["dec0"] / 10**ctx["dec1"])
+                        range_max = 1.0001 ** tick_hi * (10**ctx["dec0"] / 10**ctx["dec1"])
+                        pool_event_msg = (
+                            f"{event_name}\t\t"
+                            f"{ctx['sym0']:<6} / {ctx['sym1']:<6} / {ctx['fee']:<5} "
+                            f"\t\ta0= {a0:>13.6f}\t\ta1= {a1:>13.6f}\t\t"
+                            f"range=[{range_min:>9.6f}, {range_max:>9.6f}, ticks:{tick_delta:>9.6f}] "
+                        )
+                        ctx["pool_logger"].info(pool_event_msg)
+
+            except Web3RPCError as e:
+                if 'Too Many Requests' in str(e):
+                    logger.error(f"Rate limited, waiting 60s...")
+                    await asyncio.sleep(60)
+            except Exception as e:
+                logger.exception("Websocket listener dropped, reconnect in 3s: %s", e)
+                await asyncio.sleep(3)
+
+
+
+    async def listener_old(self, key, value):
         addr = value["address"]
         dec0 = self.tokens_data[key[0]]["decimals"]
         dec1 = self.tokens_data[key[1]]["decimals"]
@@ -172,6 +306,8 @@ class ChainLink2:
                     {"address": addr}
                 )
                 async for msg in w3.socket.process_subscriptions():
+
+                    print("RAW:", msg)
                     log = msg.get("result")
                     if not log:
                         continue
@@ -185,6 +321,9 @@ class ChainLink2:
                         topic0 = topic0.hex()
                     if isinstance(topic0, str) and not topic0.startswith("0x"):
                         topic0 = f"0x{topic0}"
+
+                    print("EXPECTED SWAP:", swap_topic)
+                    print("GOT:", topic0)
 
                     if topic0 not in event_dispatcher:
                         continue

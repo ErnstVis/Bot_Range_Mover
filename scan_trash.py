@@ -68,7 +68,7 @@ def main():
 
         for base, quote, fee in [
             # ('ETH', 'rETH', 100),
-            # ('ETH', 'rETH', 500),
+            ('ETH', 'rETH', 500),
             # ('ETH', 'rETH', 3000),
             # ('rETH', 'wstETH', 500),
 
@@ -78,9 +78,9 @@ def main():
 
             # ('ETH', 'weETH', 100),
             # ('ETH', 'weETH', 500),
-            # ('ETH', 'weETH', 3000),
+            ('ETH', 'weETH', 3000),
 
-            # ('ETH', 'ezETH', 100),
+            ('ETH', 'ezETH', 100),
             # ('ETH', 'ezETH', 500),
             # ('ETH', 'ezETH', 3000),
             # ('ETH', 'ezETH', 10000),
@@ -89,6 +89,10 @@ def main():
             # ('ETH', 'wstETH', 500),
             # ('ETH', 'wstETH', 3000),
             # ('ETH', 'wstETH', 10000),
+
+            
+            # ('ETH', 'USDC', 500),
+            # ('ETH', 'USDC', 3000),
         ]:
         
             key, value = chain.resolve_pool_key(chain.pools_data, base, quote, fee)
