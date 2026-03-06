@@ -1,11 +1,15 @@
 .venv/
 .venv311/
 private/
+config/
 data/
 pictures/
 logs/
 trash/
 archive/
 saves/
+package/__pycache__/
+package/__init__.py
+package/__init__.pyc
 .env
 *.env

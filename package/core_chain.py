@@ -264,7 +264,7 @@ class ChainLink2:
                             f"{event_name}\t\t"
                             f"{ctx['sym0']:<6} / {ctx['sym1']:<6} / {ctx['fee']:<5} "
                             f"\t\ta0= {a0:>13.6f}\t\ta1= {a1:>13.6f}\t\t"
-                            f"range=[{range_min:>9.6f}, {range_max:>9.6f}, ticks:{tick_delta:>9.6f}] "
+                            f"range:{range_min:>9.6f}, {range_max:>9.6f}, ticks:{tick_lo:>9.6f}, {tick_hi:>9.6f}, delta:{tick_delta:>9.6f}"
                         )
                         ctx["pool_logger"].info(pool_event_msg)
 
