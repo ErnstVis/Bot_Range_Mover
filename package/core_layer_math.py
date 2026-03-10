@@ -517,36 +517,27 @@ class BotPos:
         if valid:
             self.L_fee = max(valid, key=lambda f: valid[f]["gross"])
         print(f"Gross best {self.L_fee} pool", results[self.L_fee]["gross"])
-        now = datetime.now()
-        # for fee, data in results.items():
-        #     new_row = self.ScanSlow(
-        #         timestamp = now,
-        #         proto = 'uni3',
-        #         fee = fee,
-        #         price = data.get("price"),
-        #         gross = data.get("gross"),
-        #         liq = data.get("liq"))
-        #     self.session.add(new_row)
-        # self.session.commit()
 
-        session = self.Session()
-        try:
-            for fee, data in results.items():
-                new_row = self.ScanSlow(
-                    timestamp = now,
-                    proto = 'uni3',
-                    fee = fee,
-                    price = data.get("price"),
-                    gross = data.get("gross"),
-                    liq = data.get("liq")
-                )
-                session.add(new_row)
-            session.commit()
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
+        # ADD TO DB
+        # now = datetime.now()
+        # session = self.Session()
+        # try:
+        #     for fee, data in results.items():
+        #         new_row = self.ScanSlow(
+        #             timestamp = now,
+        #             proto = 'uni3',
+        #             fee = fee,
+        #             price = data.get("price"),
+        #             gross = data.get("gross"),
+        #             liq = data.get("liq")
+        #         )
+        #         session.add(new_row)
+        #     session.commit()
+        # except Exception:
+        #     session.rollback()
+        #     raise
+        # finally:
+        #     session.close()
 
 
     def actuate_win_reg(self):
@@ -563,31 +554,37 @@ class BotPos:
             z1 = max(0, min(z1, 30))
             z2 = 30 - z1
         print('\t|', '.' * z1, '|', '.' * z2, '|', sep='')
-        new_pos = self.ScanFast(
-            timestamp = datetime.now(),
-            price_dex = self.P_act,
-            price_cex = math.nan,
-            vola = math.nan,
-            sma = math.nan,
-            macd = math.nan,
-            actual_max = self.P_max,
-            actual_min = self.P_min,
-            teo_new_max = math.nan,
-            teo_new_min = math.nan)
-        
-        session = self.Session()
-        try:
-            session.add(new_pos)
-            session.commit()
-        finally:
-            session.close()
 
-        # self.session.add(new_pos)
-        # self.session.commit()
+
+        # ADD TO DB
+        # new_pos = self.ScanFast(
+        #     timestamp = datetime.now(),
+        #     price_dex = self.P_act,
+        #     price_cex = math.nan,
+        #     vola = math.nan,
+        #     sma = math.nan,
+        #     macd = math.nan,
+        #     actual_max = self.P_max,
+        #     actual_min = self.P_min,
+        #     teo_new_max = math.nan,
+        #     teo_new_min = math.nan)
+        
+        # session = self.Session()
+        # try:
+        #     session.add(new_pos)
+        #     session.commit()
+        # finally:
+        #     session.close()
+
+
+        # TEST CALC TO CONFIG
+        # self.params = self.load_config(self.descriptor)
+        # self.params["teo_max"] = self.teo_max
+        # self.params["teo_min"] = self.teo_min
+        # self.save_config(self.params, self.descriptor)
+
+        # REFRESH CONFIG
         self.params = self.load_config(self.descriptor)
-        self.params["teo_max"] = self.teo_max
-        self.params["teo_min"] = self.teo_min
-        self.save_config(self.params, self.descriptor)
         for key, value in self.params.items():
             setattr(self, key, value)
 
