@@ -18,12 +18,15 @@ class ChainLink:
     def __init__(self, blockchain, token0, token1, proto, wallet):
         if blockchain == 'arbitrum':                                        # open chain config file
             path = 'config/addresses/arbitrum.json'
+            rpc_key = 'RPC_ARBITRUM'
             self.gas_limit = 0.15
         elif blockchain == 'polygon':
             path = 'config/addresses/polygon.json'
+            rpc_key = 'RPC_POLYGON'
             self.gas_limit = 10000
         elif blockchain == 'optimism':
             path = 'config/addresses/optimism.json'
+            rpc_key = 'RPC_OPTIMISM'
         with open(path, 'r') as f:
             params = json.load(f)
         # self.tokens = params.get("tokens", {})      # get tokens dict
@@ -60,8 +63,8 @@ class ChainLink:
             self.address_withdraw = os.getenv("WORK_ADR")
             self.address_wallet = os.getenv("MAIN_ADR")
             self.key_wallet = os.getenv("WORK_KEY")
-        self.key_rpc = os.getenv("INFURA_API")
-        self.connection = Web3(Web3.HTTPProvider(self.rpc + self.key_rpc))                 # connect to node
+        self.rpc = os.getenv(rpc_key)
+        self.connection = Web3(Web3.HTTPProvider(self.rpc))                 # connect to node
         if self.connection.is_connected():
             print("Connected!")
         else:

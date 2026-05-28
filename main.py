@@ -61,128 +61,130 @@ def main():
         print('Trading is OFF')
 
     chain = ChainLink(ch, tok0, tok1, proto, 'test')
-    pos = BotPos(desc, 0, chain)
+    inst = BotPos(desc, 0, chain)
 
     # =========================== ROUTINE ================================
     count = 0
     while True:
         # JOB PROCESSING OR JUST DATA COLLECTION
         if trade_on == 1:
-            if pos.step == 0:      # Begined
-                pos.proc_shift()
-            elif pos.step == 10:
-                if pos.proc_swap() != 1:
+            if inst.step == 0:      # Begined
+                inst.proc_shift()
+            elif inst.step == 10:
+                if inst.proc_swap() != 1:
                     print('\nSTATUS NOT 1...')
                     time.sleep(30)
                     continue
-            elif pos.step == 1:
-                if pos.proc_open() != 1:
+            elif inst.step == 1:
+                if inst.proc_open() != 1:
                     print('\nSTATUS NOT 1...')
                     time.sleep(30)
                     continue
-                pos.params = pos.load_config(desc)
-                pos.params["range_width"] = pos.P_max - pos.P_min
-                pos.params["L_fee"] = pos.L_fee
-                pos.save_config(pos.params, desc)
-            elif pos.step == 2:                     # Opened
+                inst.params = inst.load_config(desc)
+                inst.params["range_width"] = inst.P_max - inst.P_min
+                inst.params["L_fee"] = inst.L_fee
+                inst.save_config(inst.params, desc)
+            elif inst.step == 2:                     # Opened
                 if count >= 120:
-                    pos.actuate_win_slow()
+                    inst.actuate_win_slow()
                     count = 0
                 else:
-                    pos.actuate_win_reg()
-                if pos.P_act > pos.P_max:
-                    if pos.proc_close() != 1:
+                    inst.actuate_win_reg()
+                if inst.P_act > inst.P_max:
+                    if inst.proc_close() != 1:
                         print('\nSTATUS NOT 1...')
                         time.sleep(30)
                         continue
-                    if pos.mode != 'T':
-                        pos.prev_mode = pos.mode
-                    pos.mode = 'U'
-                    pos.params = pos.load_config(desc)
-                    pos.params["prev_mode"] = pos.prev_mode
-                    pos.params["mode"] = pos.mode
-                    pos.save_config(pos.params, desc)
+                    if inst.mode != 'T':
+                        inst.prev_mode = inst.mode
+                    inst.mode = 'U'
+                    inst.params = inst.load_config(desc)
+                    inst.params["prev_mode"] = inst.prev_mode
+                    inst.params["mode"] = inst.mode
+                    inst.save_config(inst.params, desc)
                     continue
-                elif pos.P_act < pos.P_min:
-                    if pos.proc_close() != 1:
+                elif inst.P_act < inst.P_min:
+                    if inst.proc_close() != 1:
                         print('\nSTATUS NOT 1...')
                         time.sleep(30)
                         continue
-                    if pos.mode != 'T':
-                        pos.prev_mode = pos.mode
-                    pos.mode = 'D'
-                    pos.params = pos.load_config(desc)
-                    pos.params["prev_mode"] = pos.prev_mode
-                    pos.params["mode"] = pos.mode
-                    pos.save_config(pos.params, desc)
+                    if inst.mode != 'T':
+                        inst.prev_mode = inst.mode
+                    inst.mode = 'D'
+                    inst.params = inst.load_config(desc)
+                    inst.params["prev_mode"] = inst.prev_mode
+                    inst.params["mode"] = inst.mode
+                    inst.save_config(inst.params, desc)
                     continue
                 elif (
-                    pos.timestamp_IN                       # if opened 
-                    and datetime.now() - pos.timestamp_IN
-                    > timedelta(hours=pos.dyn_period_scale())       # if time to reopen
-                    and pos.test_range_mod()                        # if logic allows
+                    inst.timestamp_IN                       # if opened 
+                    and datetime.now() - inst.timestamp_IN
+                    > timedelta(hours=inst.dyn_period_scale())       # if time to reopen
+                    and inst.test_range_mod()                        # if logic allows
                 ):
-                    if pos.proc_close() != 1:
+                    if inst.proc_close() != 1:
                         print('\nSTATUS NOT 1...')
                         time.sleep(30)
                         continue
-                    if pos.mode != 'T':
-                        pos.prev_mode = pos.mode
-                    pos.mode = 'T'
-                    pos.params = pos.load_config(desc)
-                    pos.params["prev_mode"] = pos.prev_mode
-                    pos.params["mode"] = pos.mode
-                    pos.save_config(pos.params, desc)
+                    if inst.mode != 'T':
+                        inst.prev_mode = inst.mode
+                    inst.mode = 'T'
+                    inst.params = inst.load_config(desc)
+                    inst.params["prev_mode"] = inst.prev_mode
+                    inst.params["mode"] = inst.mode
+                    inst.save_config(inst.params, desc)
                     continue
-                time.sleep(60)
-            elif pos.step == 3 or pos.step == 4:
-                if pos.proc_close() != 1:
+                time.sleep(120)
+            elif inst.step == 3 or inst.step == 4:
+                if inst.proc_close() != 1:
                     print('\nSTATUS NOT 1...')
                     time.sleep(30)
                     continue
-            elif pos.step == 5:
-                pos.proc_modify()
-                pos.chain.L_fee = pos.L_fee         # Put best pool of last hour to new position
-                pos.step = 0
+            elif inst.step == 5:
+                inst.proc_modify()
+                inst.chain.L_fee = inst.L_fee         # Put best pool of last hour to new position
+                inst.step = 0
 
         elif trade_on == 2:
-            if pos.step == 2 or pos.step == 3 or pos.step == 4:
+            if inst.step == 2 or inst.step == 3 or inst.step == 4:
                 print('\nManual close triggered...')
-                if pos.proc_close() != 1:
+                if inst.proc_close() != 1:
                     print('\nSTATUS NOT 1...')
                     time.sleep(30)
                     continue
-            elif pos.step == 5:
-                pos.step = 10
-                pos.P_min = pos.init_min
-                pos.P_max = pos.init_max
-                pos.range_width = pos.P_max - pos.P_min
-                pos.chain.L_fee = pos.L_fee
-            elif pos.step == 10:
+                break
+            elif inst.step == 5:
+                inst.step = 10
+                inst.P_min = inst.init_min
+                inst.P_max = inst.init_max
+                inst.range_width = inst.P_max - inst.P_min
+                inst.chain.L_fee = inst.L_fee
+            elif inst.step == 10:
                 print('\nManual swap triggered...')
-                if pos.proc_swap() != 1:
+                if inst.proc_swap() != 1:
                     print('\nSTATUS NOT 1...')
                     time.sleep(30)
                     continue
-            elif pos.step == 1:
+                break
+            elif inst.step == 1:
                 print('\nManual open triggered...')
-                if pos.proc_open() != 1:
+                if inst.proc_open() != 1:
                     print('\nSTATUS NOT 1...')
                     time.sleep(30)
                     continue
-                pos.params = pos.load_config(desc)
-                pos.params["range_width"] = pos.P_max - pos.P_min
-                pos.params["L_fee"] = pos.L_fee
-                pos.save_config(pos.params, desc)
+                inst.params = inst.load_config(desc)
+                inst.params["range_width"] = inst.P_max - inst.P_min
+                inst.params["L_fee"] = inst.L_fee
+                inst.save_config(inst.params, desc)
                 break
 
         else:
             if count >= 120:
-                pos.actuate_win_slow()
+                inst.actuate_win_slow()
                 count = 0
             else:
-                pos.actuate_win_reg()
-            time.sleep(60)
+                inst.actuate_win_reg()
+            time.sleep(120)
         count += 1
 
 if __name__ == "__main__":

@@ -19,14 +19,14 @@ class Positions(Base):
     id = Column(Integer, primary_key=True)
     descriptor = Column(Integer)
     position = Column(Integer)
-    range_MIN = Column(Float)
-    range_MAX = Column(Float)
-    timestamp_IN = Column(DateTime)
-    timestamp_OUT = Column(DateTime)
-    token0_IN = Column(Float)
-    token1_IN = Column(Float)
-    token0_OUT = Column(Float)
-    token1_OUT = Column(Float)
+    range_min = Column(Float)
+    range_max = Column(Float)
+    timestamp_in = Column(DateTime)
+    timestamp_out = Column(DateTime)
+    token0_in = Column(Float)
+    token1_in = Column(Float)
+    token0_out = Column(Float)
+    token1_out = Column(Float)
     token0_fee = Column(Float)
     token1_fee = Column(Float)
     token0_swap = Column(Float)
@@ -36,7 +36,10 @@ class Positions(Base):
     native = Column(Float)
     price = Column(Float)
     liq = Column(Float)
-    step = Column(Integer)
+    step = Column(Integer)   
+    tx_hash_swap = Column(String(66))
+    tx_hash_in = Column(String(66))
+    tx_hash_out = Column(String(66))
 
 def make_scan_class(suffix):
     fast_table = "scan_fast_" + str(suffix)
@@ -139,8 +142,8 @@ class BotPos:
                 print('Added')
             elif pos.step != 1:
                 self.id = pos.position
-                self.P_max = pos.range_MAX
-                self.P_min = pos.range_MIN
+                self.P_max = pos.range_max
+                self.P_min = pos.range_min
                 self.range_width = self.P_max - self.P_min
                 print('Last position ID:', self.id)
             else:
@@ -150,8 +153,8 @@ class BotPos:
                 session.commit()
             self.db_pos_id = pos.id
             self.step = pos.step
-            if pos.timestamp_IN:
-                self.timestamp_IN = pos.timestamp_IN
+            if pos.timestamp_in:
+                self.timestamp_IN = pos.timestamp_in
             else:
                 self.timestamp_IN = datetime.now()
             print(
@@ -367,13 +370,13 @@ class BotPos:
             session = self.Session()
             try:            
                 pos = session.get(Positions, self.db_pos_id)
-                pos.timestamp_IN = datetime.now()
-                pos.token0_IN = x0
-                pos.token1_IN = x1
+                pos.timestamp_in = datetime.now()
+                pos.token0_in = x0
+                pos.token1_in = x1
                 pos.position = self.id
                 pos.liq = self.L
-                pos.range_MIN = self.P_min = self.chain.price_from_tick(self.P_min_tick)
-                pos.range_MAX = self.P_max = self.chain.price_from_tick(self.P_max_tick)
+                pos.range_min = self.P_min = self.chain.price_from_tick(self.P_min_tick)
+                pos.range_max = self.P_max = self.chain.price_from_tick(self.P_max_tick)
                 pos.step = self.step
                 session.commit()
             finally:
@@ -395,8 +398,8 @@ class BotPos:
                 session = self.Session()
                 try:
                     pos = session.get(Positions, self.db_pos_id)
-                    pos.token0_OUT = x0
-                    pos.token1_OUT = x1
+                    pos.token0_out = x0
+                    pos.token1_out = x1
                     pos.price = self.P_act
                     pos.step = self.step
                     session.commit()
@@ -415,9 +418,9 @@ class BotPos:
                 session = self.Session()
                 try:
                     pos = session.get(Positions, self.db_pos_id)
-                    pos.timestamp_OUT = datetime.now()
-                    pos.token0_fee = x0 - pos.token0_OUT
-                    pos.token1_fee = x1 - pos.token1_OUT
+                    pos.timestamp_out = datetime.now()
+                    pos.token0_fee = x0 - pos.token0_out
+                    pos.token1_fee = x1 - pos.token1_out
                     pos.step = self.step
                     session.commit()
                 finally:
