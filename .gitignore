@@ -6,6 +6,10 @@ logs/
 trash/
 archive/
 saves/
+.vscode/
+__pycache__/
+.pytest_cache/
+tests/__pycache__/
 package/__pycache__/
 package/__init__.pyc
 .env

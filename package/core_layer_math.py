@@ -3,7 +3,7 @@ import time
 import os
 import math
 import json
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
+from sqlalchemy import Boolean, create_engine, Column, Integer, String, Float, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.ext.declarative import DeclarativeMeta
 from datetime import datetime
@@ -12,84 +12,70 @@ import sys
 import numpy as np
 sys.stdout.reconfigure(encoding="utf-8")
 
+'''
+In this file - bot math level, main logic functions, data base operations.
+'''
 
 Base: DeclarativeMeta = declarative_base()
 class Positions(Base):
     __tablename__ = "positions"
     id = Column(Integer, primary_key=True)
-    descriptor = Column(Integer)
-    position = Column(Integer)
-    range_min = Column(Float)
-    range_max = Column(Float)
-    timestamp_in = Column(DateTime)
-    timestamp_out = Column(DateTime)
-    token0_in = Column(Float)
-    token1_in = Column(Float)
-    token0_out = Column(Float)
-    token1_out = Column(Float)
-    token0_fee = Column(Float)
-    token1_fee = Column(Float)
-    token0_swap = Column(Float)
-    token1_swap = Column(Float)
-    balance_0 = Column(Float)
-    balance_1 = Column(Float)
-    native = Column(Float)
+
+    chain = Column(String)
+    proto = Column(String)
+    fee = Column(Integer)
+    token0 = Column(String)
+    token1 = Column(String)
+
+    operation = Column(String)
+    timestamp = Column(DateTime)
+    delta0 = Column(Float)
+    delta1 = Column(Float)
+    delta_native = Column(Float)
+
+    fees0 = Column(Float)
+    fees1 = Column(Float)
+    range_lo = Column(Float)
+    range_hi = Column(Float)
     price = Column(Float)
     liq = Column(Float)
-    step = Column(Integer)   
-    tx_hash_swap = Column(String(66))
-    tx_hash_in = Column(String(66))
-    tx_hash_out = Column(String(66))
+    nft = Column(Integer)
+    tx_hash = Column(String(66))
 
-def make_scan_class(suffix):
-    fast_table = "scan_fast_" + str(suffix)
-    slow_table = "scan_slow_" + str(suffix)
-    fast_cls = None
-    if fast_table in Base.metadata.tables:
-        for cls in Base._decl_class_registry.values():
-            if hasattr(cls, "__tablename__") and cls.__tablename__ == fast_table:
-                fast_cls = cls
-                break
-    slow_cls = None
-    if slow_table in Base.metadata.tables:
-        for cls in Base._decl_class_registry.values():
-            if hasattr(cls, "__tablename__") and cls.__tablename__ == slow_table:
-                slow_cls = cls
-                break
-    if fast_cls is None:
-        class Scan_fast(Base):
-            __tablename__ = fast_table
-            id = Column(Integer, primary_key=True)
-            timestamp = Column(DateTime)
-            price_dex = Column(Float)
-            price_cex = Column(Float)
-            vola = Column(Float)
-            sma = Column(Float)
-            macd = Column(Float)
-            actual_max = Column(Float)
-            actual_min = Column(Float)
-            teo_new_max = Column(Float)
-            teo_new_min = Column(Float)
-        fast_cls = Scan_fast
-    if slow_cls is None:
-        class Scan_slow(Base):
-            __tablename__ = slow_table
-            id = Column(Integer, primary_key=True)
-            timestamp = Column(DateTime)
-            proto = Column(String)
-            fee = Column(Integer)
-            price = Column(Float)
-            gross = Column(Float)
-            liq = Column(Float)
-        slow_cls = Scan_slow
-    return fast_cls, slow_cls
+    balance_0 = Column(Float)
+    balance_1 = Column(Float)
+    balance_native = Column(Float)
+
+class ScanPool(Base):
+    __tablename__ = "scan_pool"
+    id = Column(Integer, primary_key=True)
+    
+    chain = Column(String)
+    proto = Column(String)
+    fee = Column(Integer)
+    token0 = Column(String)
+    token1 = Column(String)
+
+    timestamp = Column(DateTime)
+    price = Column(Float)
+    price_lo = Column(Float)
+    price_hi = Column(Float)
+    
+    locked0 = Column(Float)
+    locked1 = Column(Float)
+    liq = Column(Float)
+    gross0 = Column(Float)
+    gross1 = Column(Float)
+    liq_net_u10 = Column(Float)
+    liq_net_u30 = Column(Float)
+    liq_net_d10 = Column(Float)
+    liq_net_d30 = Column(Float)
 
 
 # =============================================== Bot operations
 class BotPos:
-    def __init__(self, descriptor, sim, inst_main):
+    def __init__(self, descriptor, inst_main):
         self.chain = inst_main
-        self.sim = sim
         self.descriptor = descriptor
         self.params = self.load_config(self.descriptor)
         for key, value in self.params.items():
@@ -100,10 +86,11 @@ class BotPos:
         res = self.chain.get_current_tick()
         if res is not None:
             self.P_act_tick, self.P_act = res
-        self.P_min = self.init_min
-        self.P_max = self.init_max
+            self.P_hi = self.P_act
+            self.P_lo = self.P_act
+        self.P_min = self.range_min
+        self.P_max = self.range_max
         self.rangemod_not_needed = False
-        self.ScanFast, self.ScanSlow = make_scan_class(self.descriptor)
         load_dotenv("private/secrets.env")
 
         engine = create_engine(os.getenv("SQL"), pool_pre_ping=True, pool_recycle=1800)
@@ -111,12 +98,9 @@ class BotPos:
         Session = sessionmaker(bind=engine)
         self.Session = Session
 
-        # engine = create_engine(os.getenv("SQL"))
-        # Base.metadata.create_all(engine)
-        # Session = sessionmaker(bind=engine)
-        # self.session = Session()
-
-        self.db_check()
+        if self.nft_id and not self.mint_time:
+            self.mint_time = datetime.now()
+            
         self.L_fee = self.chain.L_fee
         for fee, pool in self.chain.pools.items():
             res = self.chain.get_liquidity(fee=fee)
@@ -124,122 +108,6 @@ class BotPos:
                 pool["liquidity"], pool["gross0"], pool["gross1"] = res
         print('-'*25, '\nInit bot layer completed\n')
 
-
-
-    def db_check(self):
-        with self.Session() as session:
-            pos = (
-                session.query(Positions)
-                .filter(Positions.descriptor == self.descriptor)
-                .order_by(Positions.id.desc())
-                .first()
-            )
-            if pos is None or pos.step in (0, 5):
-                pos = Positions(descriptor=self.descriptor, step=0)
-                session.add(pos)
-                session.commit()
-                session.refresh(pos)   # получаем id
-                print('Added')
-            elif pos.step != 1:
-                self.id = pos.position
-                self.P_max = pos.range_max
-                self.P_min = pos.range_min
-                self.range_width = self.P_max - self.P_min
-                print('Last position ID:', self.id)
-            else:
-                print('Debug: incompleted position detected, step == ', pos.step , ', setting step to 0')
-                self.rangemod_not_needed = True
-                pos.step = 0
-                session.commit()
-            self.db_pos_id = pos.id
-            self.step = pos.step
-            if pos.timestamp_in:
-                self.timestamp_IN = pos.timestamp_in
-            else:
-                self.timestamp_IN = datetime.now()
-            print(
-                'Complecting of last position:',
-                self.step,
-                'desc:',
-                self.descriptor
-            )
-
-
-    # def db_check(self):
-    #     session = self.Session()
-    #     try:
-    #         self.pos_data = (
-    #             session.query(Positions)
-    #             .filter(Positions.descriptor == self.descriptor)
-    #             .order_by(Positions.id.desc())
-    #             .first()
-    #         )
-    #     finally:
-    #         session.close()
-    #     # self.pos_data = self.session.query(Positions).filter(Positions.descriptor == self.descriptor).order_by(Positions.id.desc()).first()
-    #     print(self.pos_data.id, self.pos_data.step, self.pos_data.position, self.pos_data.timestamp_IN, self.pos_data.descriptor)
-    #     if self.pos_data is None:
-    #         print('Debug: first line with current descriptor')
-    #         self.db_add()
-    #     if self.pos_data.step == 5 or self.pos_data.step == 0:
-    #         print('Debug: step 0 or 5 detected, creating new DB entry')
-    #         self.db_add()
-    #     elif self.pos_data.step != 1:
-    #         self.id = self.pos_data.position
-    #         self.P_max = self.pos_data.range_MAX
-    #         self.P_min = self.pos_data.range_MIN
-    #         print('Last position ID:', self.id)
-    #     else:
-    #         self.pos_data.step = 0
-    #         print('Debug: incompleted position detected, setting step to 0')
-    #     self.step = self.pos_data.step
-    #     print('Complecting of last position:', self.step, 'desc:', self.descriptor)
-    
-    # def db_add(self):
-    #     self.pos_data = Positions(descriptor = self.descriptor, step = 0)
-    #     session = self.Session()
-    #     try:
-    #         session.add(self.pos_data)
-    #         session.commit()
-    #     finally:
-    #         session.close()
-    #     # self.session.add(self.pos_data)
-    #     # self.session.commit()
-
-    # def db_add(self):
-    #     with self.Session() as session:
-    #         pos = Positions(descriptor=self.descriptor, step=0)
-    #         session.add(pos)
-    #         session.commit()
-    #         session.refresh(pos)   # ← получаем id
-    #         self.pos_id = pos.id
-
-
-
-    def proc_shift(self):
-        print('\n\n\n', '=' * 25, 'Shifting')
-        if self.rangemod_not_needed == True:
-            print('Range modification not needed, skipping...')
-            self.step = 10
-            return
-        print('Old TEO range:', self.P_min, self.P_max)
-        if self.prev_mode == 'D' and self.mode == 'U':
-            self.P_max = self.P_min + self.range_width
-        elif self.prev_mode == 'U' and self.mode == 'D':
-            self.P_min = self.P_max - self.range_width
-        elif self.prev_mode == 'U' and self.mode == 'U':
-            self.P_min += self.range_width * self.range_shifter
-            self.P_max = self.P_min + self.range_width
-        elif self.prev_mode == 'D' and self.mode == 'D':
-            self.P_max -= self.range_width * self.range_shifter
-            self.P_min = self.P_max - self.range_width
-        elif self.mode == 'T':
-            top_k = (self.P_max - self.P_act) / (self.P_max - self.P_min)
-            bottom_k = (self.P_act - self.P_min) / (self.P_max - self.P_min)
-            self.P_max = self.P_act + self.range_width * top_k
-            self.P_min = self.P_act - self.range_width * bottom_k
-        self.step = 10
-        print('New TEO range:', self.P_min, self.P_max, '\n')
 
     def proc_swap(self):
         print('\n', '=' * 25, 'Swaping')
@@ -260,14 +128,14 @@ class BotPos:
                 # self.chain.approve_token(self.amm1_limitation, 1, 'r', wait=1)
                 # self.chain.approve_token(0, 1, 'r', wait=1)
                 self.chain.S_fee = self.scan_swap(self.amm0_get, 0, 'Q')
-                x, x0, x1 = self.chain.get_swap_ammount_router(self.amm0_get, self.amm1_limitation, 0, 'Q')
+                tx_hash, x0, x1 = self.chain.get_swap_ammount_router(self.amm0_get, self.amm1_limitation, 0, 'Q')
             else:
                 self.amm1_limitation = -self.amm0_get * self.P_act * (1 - self.slippage)
                 print('Limit1:', self.amm1_limitation)
                 # self.chain.approve_token(-self.amm0_get, 0, 'r', wait=1)
                 # self.chain.approve_token(0, 0, 'r', wait=1)
                 self.chain.S_fee = self.scan_swap(-self.amm0_get, 1, 'I')
-                x, x0, x1 = self.chain.get_swap_ammount_router(-self.amm0_get, self.amm1_limitation, 1, 'I')
+                tx_hash, x0, x1 = self.chain.get_swap_ammount_router(-self.amm0_get, self.amm1_limitation, 1, 'I')
             # self.amm1 -= self.amm0_get * self.P_act
             # self.amm0 += self.amm0_get
             # am0new = k * am1 / (1 + k * p)
@@ -284,35 +152,30 @@ class BotPos:
                 # self.chain.approve_token(self.amm0_limitation, 0, 'r', wait=1)
                 # self.chain.approve_token(0, 0, 'r', wait=1)
                 self.chain.S_fee = self.scan_swap(self.amm1_get, 1, 'Q')
-                x, x0, x1 = self.chain.get_swap_ammount_router(self.amm1_get, self.amm0_limitation, 1, 'Q')
+                tx_hash, x0, x1 = self.chain.get_swap_ammount_router(self.amm1_get, self.amm0_limitation, 1, 'Q')
             else:
                 self.amm0_limitation = -self.amm1_get / self.P_act * (1 - self.slippage)
                 print('Limit0:', self.amm0_limitation)
                 # self.chain.approve_token(-self.amm1_get, 1, 'r', wait=1)
                 # self.chain.approve_token(0, 1, 'r', wait=1)
                 self.chain.S_fee = self.scan_swap(-self.amm1_get, 0, 'I')
-                x, x0, x1 = self.chain.get_swap_ammount_router(-self.amm1_get, self.amm0_limitation, 0, 'I')
+                tx_hash, x0, x1 = self.chain.get_swap_ammount_router(-self.amm1_get, self.amm0_limitation, 0, 'I')
             # self.amm0 -= self.amm1_get / self.P_act
             # self.amm1 += self.amm1_get  
             # am1new = (k * am0 * p) / (k + p)
-
-        if x == 1:
-            self.db_check()
-            self.step = 1
-            session = self.Session()
-            try:
-                pos = session.get(Positions, self.db_pos_id)
-                pos.token0_swap = x0
-                pos.token1_swap = x1
-                pos.step = self.step
-                session.commit()
-            finally:
-                session.close()
+        if tx_hash:
+            with self.Session() as session:
+                with session.begin():
+                    row = Positions(
+                        timestamp = datetime.now(),
+                        delta0 = x0,
+                        delta1 = x1
+                    )
+                    session.add(row)
+            return 1
         else:
             print('Debug: swap failed')
-        return x
-
-
+            return 0
 
     def proc_open(self):
         print('\n', '=' * 25, 'Opening')
@@ -360,107 +223,125 @@ class BotPos:
         # self.chain.approve_token(self.amm1, 1, 'm', wait=1)
         # self.chain.approve_token(0, 0, 'm', wait=1)
         # self.chain.approve_token(0, 1, 'm', wait=1)
-        x, x0, x1, self.id, self.L = self.chain.liq_add(self.P_min_tick, self.P_max_tick, self.amm0, self.amm1, wait=1)
-        print('Pos id:', self.id)
+        tx_hash, x0, x1, self.nft_id, self.L = self.chain.liq_mint(self.P_min_tick, self.P_max_tick, self.amm0, self.amm1, wait=1)
+        print('Pos id:', self.nft_id)
         print('Not used tokens:')
-        if x == 1:
+        if tx_hash:
             self.amm0 = self.chain.get_balance_token(0)
             self.amm1 = self.chain.get_balance_token(1)
-            self.step = 2
-            session = self.Session()
-            try:            
-                pos = session.get(Positions, self.db_pos_id)
-                pos.timestamp_in = datetime.now()
-                pos.token0_in = x0
-                pos.token1_in = x1
-                pos.position = self.id
-                pos.liq = self.L
-                pos.range_min = self.P_min = self.chain.price_from_tick(self.P_min_tick)
-                pos.range_max = self.P_max = self.chain.price_from_tick(self.P_max_tick)
-                pos.step = self.step
-                session.commit()
-            finally:
-                session.close()
-            # self.session.commit()
+            self.P_min = self.chain.price_from_tick(self.P_min_tick)
+            self.P_max = self.chain.price_from_tick(self.P_max_tick)
+            self.mint_time = datetime.now()
 
-            # print teo min exit
-            # print teo max exit
+            with self.Session() as session:
+                with session.begin():
+                    row = Positions(
+                        timestamp=self.mint_time,
+                        token0_in=x0,
+                        token1_in=x1,
+                        liq=self.L,
+                        range_min=self.P_min,
+                        range_max=self.P_max
+                    )
+                    session.add(row)
+            return 1
         else:
             print('Debug: add failed')
-        return x
+            return 0
 
-    def proc_close(self):
-        if self.step == 2:
-            time.sleep(1)
-            x, x0, x1 = self.chain.liq_remove(self.id)
-            if x == 1:
-                self.step = 3
-                session = self.Session()
-                try:
-                    pos = session.get(Positions, self.db_pos_id)
-                    pos.token0_out = x0
-                    pos.token1_out = x1
-                    pos.price = self.P_act
-                    pos.step = self.step
-                    session.commit()
-                finally:
-                    session.close()
-                # self.session.commit()
-            else:
-                print('Debug: remove failed')
+    def proc_increase(self):
+        res = self.chain.get_current_tick()
+        if res is not None:
+            self.P_act_tick, self.P_act = res
+        print('\nIncrease position assets:')
+        self.amm0 = self.chain.get_balance_token(0)
+        self.amm1 = self.chain.get_balance_token(1)
+        print('='*25)
+        tx_hash, x0, x1, self.L = self.chain.liq_increase(self.nft_id, self.amm0, self.amm1)
+        if tx_hash:
+            with self.Session() as session:
+                with session.begin():
+                    row = Positions(
+                        chain=self.chain.chain_name,
+                        proto=self.chain.proto_name,
+                        fee=self.chain.L_fee,
+                        token0=self.chain.token0_name,
+                        token1=self.chain.token1_name,
+                        operation='increase',
+                        nft=self.nft_id,
+                        tx_hash=tx_hash,
 
-            return x
-        if self.step == 3:
-            time.sleep(1)
-            x, x0, x1 = self.chain.collect(self.id)
-            if x == 1:
-                self.step = 4
-                session = self.Session()
-                try:
-                    pos = session.get(Positions, self.db_pos_id)
-                    pos.timestamp_out = datetime.now()
-                    pos.token0_fee = x0 - pos.token0_out
-                    pos.token1_fee = x1 - pos.token1_out
-                    pos.step = self.step
-                    session.commit()
-                finally:
-                    session.close()
-                # self.session.commit()
-            else:
-                print('Debug: collect failed')
-            return x
-        if self.step == 4:
-            time.sleep(1)
-            # x, _ = self.chain.burn(self.id)
-            x = 1
+                        timestamp = datetime.now(),
+                        delta0=x0,
+                        delta1=x1,
+                        price=self.P_act
+                    )
+                    session.add(row)
+            return 1
+        else:
+            print('Debug: increase failed')
+            return 0
+
+    def proc_remove(self):
+        tx_hash, x0, x1 = self.chain.liq_remove(self.nft_id)
+        if tx_hash:
+            with self.Session() as session:
+                with session.begin():
+                    row = Positions(
+                        chain=self.chain.chain_name,
+                        proto=self.chain.proto_name,
+                        fee=self.chain.L_fee,
+                        token0=self.chain.token0_name,
+                        token1=self.chain.token1_name,
+                        operation='remove',
+                        nft=self.nft_id,
+                        tx_hash=tx_hash,
+
+                        timestamp = datetime.now(),
+                        delta0=x0,
+                        delta1=x1,
+                        price=self.P_act
+                    )
+                    session.add(row)
+            return 1
+        else:
+            print('Debug: remove failed')
+            return 0
+
+    def proc_collect(self):
+        tx_hash, x0, x1 = self.chain.collect(self.nft_id)
+        if tx_hash:
             self.amm0 = self.chain.get_balance_token(0)
             self.amm1 = self.chain.get_balance_token(1)
             self.native = self.chain.get_balance_native()
-            if x == 1:
-                self.step = 5
-                session = self.Session()
-                try:
-                    pos = session.get(Positions, self.db_pos_id)
-                    pos.balance_0 = self.amm0
-                    pos.balance_1 = self.amm1
-                    pos.native = self.native
-                    pos.step = self.step
-                    session.commit()
-                finally:
-                    session.close()
-                # self.session.commit()
-            else:
-                print('Debug: burn failed')
 
-            return x
-        return 0
-        # if mode == 'UT' or mode == 'UF':
-        #     self.amm0_lock = 0
-        #     self.amm1_lock = self.L * (math.sqrt(self.P_max) - math.sqrt(self.P_min))
-        # elif mode == 'DT' or mode == 'DF':
-        #     self.amm0_lock = self.L * (math.sqrt(self.P_max) - math.sqrt(self.P_min)) / (math.sqrt(self.P_max) * math.sqrt(self.P_min))
-        #     self.amm1_lock = 0
-        # self.L = 0
+            with self.Session() as session:
+                with session.begin():
+                    row = Positions(
+                        chain=self.chain.chain_name,
+                        proto=self.chain.proto_name,
+                        fee=self.chain.L_fee,
+                        token0=self.chain.token0_name,
+                        token1=self.chain.token1_name,
+                        operation='collect',
+                        nft=self.nft_id,
+                        tx_hash=tx_hash,
+                        
+                        timestamp = datetime.now(),
+                        delta0 = x0,
+                        delta1 = x1,
+                        price = self.P_act,
+
+                        balance_0=self.amm0,
+                        balance_1=self.amm1,
+                        balance_native=self.native,
+                    )
+                    session.add(row)
+            return 1
+        else:
+            print('Debug: collect failed')
+            return 0
+
 
     def proc_modify(self):
         print('\n\n\n', '=' * 25, 'Range modifying')
@@ -479,6 +360,26 @@ class BotPos:
             self.range_width = self.range_width_min
         print('New TEO width:', self.range_width, '\n')
 
+        print('\n\n\n', '=' * 25, 'Shifting')
+        print('Old TEO range:', self.P_min, self.P_max)
+        if self.prev_mode == 'D' and self.mode == 'U':
+            self.P_max = self.P_min + self.range_width
+        elif self.prev_mode == 'U' and self.mode == 'D':
+            self.P_min = self.P_max - self.range_width
+        elif self.prev_mode == 'U' and self.mode == 'U':
+            self.P_min += self.range_width * self.range_shifter
+            self.P_max = self.P_min + self.range_width
+        elif self.prev_mode == 'D' and self.mode == 'D':
+            self.P_max -= self.range_width * self.range_shifter
+            self.P_min = self.P_max - self.range_width
+        elif self.mode == 'T':
+            top_k = (self.P_max - self.P_act) / (self.P_max - self.P_min)
+            bottom_k = (self.P_act - self.P_min) / (self.P_max - self.P_min)
+            self.P_max = self.P_act + self.range_width * top_k
+            self.P_min = self.P_act - self.range_width * bottom_k
+        print('New TEO range:', self.P_min, self.P_max, '\n')
+
+
     def scan_swap(self, amm, token, by):
         results = {}
         for fee in self.chain.pools:
@@ -493,7 +394,33 @@ class BotPos:
         print(f"{by} mode. Best pool: {best_fee} result={results[best_fee]}")
         return best_fee
 
-    def actuate_win_slow(self):
+
+    def actuate_win_reg(self):
+        res = self.chain.get_current_tick()
+        if res is not None:
+            self.P_act_tick, self.P_act = res
+            if self.P_act > self.P_hi:
+                self.P_hi = self.P_act
+            if self.P_act < self.P_lo:
+                self.P_lo = self.P_act
+        # animation (price level in range area)
+        print(datetime.now(), end=' ')
+        rng = self.P_max - self.P_min
+        if rng <= 0:
+            z1 = z2 = 15
+        else:
+            z1 = int(30 * (self.P_act - self.P_min) / (self.P_max - self.P_min))
+            z1 = max(0, min(z1, 30))
+            z2 = 30 - z1
+        print('\t|', '.' * z1, '|', '.' * z2, '|', sep='')
+
+        # REFRESH CONFIG
+        self.params = self.load_config(self.descriptor)
+        for key, value in self.params.items():
+            setattr(self, key, value)
+
+
+    def collect_pool_state(self):
         print('Slow data parse...')
         results = {}
         for fee, pool in self.chain.pools.items():
@@ -516,80 +443,52 @@ class BotPos:
                 print('|--Lfee', fee, pool["price"], '--|', end='')
             results[fee] = {"liq": pool["liquidity"], "gross": gross, "price": pool["price"]}
             print('add result:', fee, results[fee])
+
+            # Updated part
+
+            bal_0 = self.chain.get_balance_token(0, pool['address'])
+            bal_1 = self.chain.get_balance_token(1, pool['address'])
+            res = self.chain.get_liquidity(scaner=True, fee=fee)
+            if res is not None:
+                netliq_up_near, netliq_up_far, netliq_down_near, netliq_down_far = res
+
+            # ADD TO DB
+            now = datetime.now()
+            with self.Session() as session:
+                with session.begin():
+                    row = ScanPool(
+                        timestamp = now,
+                        chain = self.chain.chain_name,
+                        proto = 'uni3',
+                        fee = fee,
+                        price = self.P_act,
+                        price_h = self.P_hi,
+                        price_l = self.P_lo,
+                        balance_0 = bal_0,
+                        balance_1 = bal_1,
+                        gross_0 = d0,
+                        gross_1 = d1,
+                        liq = pool.get("liquidity"),
+                        liq_net_up_near = netliq_up_near,
+                        liq_net_up_far = netliq_up_far,
+                        liq_net_down_near = netliq_down_near,
+                        liq_net_down_far = netliq_down_far
+                    )
+                    session.add(row)
+
         valid = {fee: data for fee, data in results.items() if data.get("gross", 0) > 0}
         if valid:
             self.L_fee = max(valid, key=lambda f: valid[f]["gross"])
         print(f"Gross best {self.L_fee} pool", results[self.L_fee]["gross"])
 
-        # ADD TO DB
-        # now = datetime.now()
-        # session = self.Session()
-        # try:
-        #     for fee, data in results.items():
-        #         new_row = self.ScanSlow(
-        #             timestamp = now,
-        #             proto = 'uni3',
-        #             fee = fee,
-        #             price = data.get("price"),
-        #             gross = data.get("gross"),
-        #             liq = data.get("liq")
-        #         )
-        #         session.add(new_row)
-        #     session.commit()
-        # except Exception:
-        #     session.rollback()
-        #     raise
-        # finally:
-        #     session.close()
+        # Updated part
+        self.P_hi = self.P_act
+        self.P_lo = self.P_act
 
 
-    def actuate_win_reg(self):
-        res = self.chain.get_current_tick()
-        if res is not None:
-            self.P_act_tick, self.P_act = res
-        # animation (price level in range area)
-        print(datetime.now(), end=' ')
-        rng = self.P_max - self.P_min
-        if rng <= 0:
-            z1 = z2 = 15
-        else:
-            z1 = int(30 * (self.P_act - self.P_min) / (self.P_max - self.P_min))
-            z1 = max(0, min(z1, 30))
-            z2 = 30 - z1
-        print('\t|', '.' * z1, '|', '.' * z2, '|', sep='')
 
 
-        # ADD TO DB
-        # new_pos = self.ScanFast(
-        #     timestamp = datetime.now(),
-        #     price_dex = self.P_act,
-        #     price_cex = math.nan,
-        #     vola = math.nan,
-        #     sma = math.nan,
-        #     macd = math.nan,
-        #     actual_max = self.P_max,
-        #     actual_min = self.P_min,
-        #     teo_new_max = math.nan,
-        #     teo_new_min = math.nan)
-        
-        # session = self.Session()
-        # try:
-        #     session.add(new_pos)
-        #     session.commit()
-        # finally:
-        #     session.close()
 
-
-        # TEST CALC TO CONFIG
-        # self.params = self.load_config(self.descriptor)
-        # self.params["teo_max"] = self.teo_max
-        # self.params["teo_min"] = self.teo_min
-        # self.save_config(self.params, self.descriptor)
-
-        # REFRESH CONFIG
-        self.params = self.load_config(self.descriptor)
-        for key, value in self.params.items():
-            setattr(self, key, value)
 
 
     def dyn_period_scale(self):
@@ -638,12 +537,23 @@ class BotPos:
             P_max = (sqrt_P / (1 - sqrt_P * (ammount_0 / L))) ** 2
             return P_max
     
+
+
     @staticmethod
-    def load_config(desc, path='config/params'):
-        with open(path + str(desc) + '.json', 'r', encoding='utf-8') as f:
-            return json.load(f)
-        
+    def load_config(desc, path='config/'):
+        file_path = os.path.join(path, 'params' + str(desc) + '.json')
+        if not os.path.exists(file_path):
+            return {}
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            print(f"File {file_path} corrupted. Creating new.")
+            return {}
+
     @staticmethod    
-    def save_config(config, desc, path='config/params'):
-        with open(path + str(desc) + '.json', 'w', encoding='utf-8') as f:
+    def save_config(config, desc, path='config/'):
+        os.makedirs(path, exist_ok=True)
+        file_path = os.path.join(path, 'params' + str(desc) + '.json')
+        with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(config, f, indent=4, ensure_ascii=False)

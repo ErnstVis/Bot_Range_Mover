@@ -10,25 +10,55 @@ import json
 from datetime import datetime
 import random
 import sys
+import builtins
 sys.stdout.reconfigure(encoding="utf-8")
+
+'''
+In this file - bot blockchain level, row blockchain calls and smart contract management.
+'''
+
+def _load_json_file(path):
+    """Robust JSON loader that supports both real files and test mocks.
+
+    Some tests may patch `builtins.open` with a function that returns a
+    file-like object without context-manager methods. This helper handles
+    both cases and returns parsed JSON.
+    """
+    f = open(path, "r")
+    try:
+        # If returned object supports context manager, use it
+        if hasattr(f, "__enter__"):
+            with f as fh:
+                return json.load(fh)
+        # Otherwise assume it has a .read() method
+        else:
+            content = f.read()
+            return json.loads(content)
+    finally:
+        try:
+            f.close()
+        except Exception:
+            pass
 
 
 # ===================================================================================== Blockchain operations
 class ChainLink:
-    def __init__(self, blockchain, token0, token1, proto, wallet):
-        if blockchain == 'arbitrum':                                        # open chain config file
+    def __init__(self, blockchain, token0, token1, proto):
+        self.chain_name = blockchain
+        if self.chain_name == 'arbitrum':                                        # open chain config file
             path = 'config/addresses/arbitrum.json'
             rpc_key = 'RPC_ARBITRUM'
             self.gas_limit = 0.15
-        elif blockchain == 'polygon':
+        elif self.chain_name == 'polygon':
             path = 'config/addresses/polygon.json'
             rpc_key = 'RPC_POLYGON'
             self.gas_limit = 10000
-        elif blockchain == 'optimism':
+        elif self.chain_name == 'optimism':
             path = 'config/addresses/optimism.json'
             rpc_key = 'RPC_OPTIMISM'
-        with open(path, 'r') as f:
-            params = json.load(f)
+        
+        params = _load_json_file(path)
+
         # self.tokens = params.get("tokens", {})      # get tokens dict
         for key, value in params.items():
             # if key != "tokens":
@@ -37,9 +67,11 @@ class ChainLink:
         self.address_token1 = getattr(self, token1)
         self.token0_name = token0
         self.token1_name = token1
-        with open("config/abi/token.json", "r") as f:
-            self.abi_token = json.load(f)
-        if proto == 'uniswap':                                              # set protocol addresses and abi
+        self.proto_name = proto
+
+        self.abi_token = _load_json_file("config/abi/token.json")
+
+        if self.proto_name == 'uniswap':                                              # set protocol addresses and abi
             self.address_factory = self.uniswap_factory
             self.address_router = self.uniswap_router
             self.address_quoter = self.uniswap_quoter
@@ -54,15 +86,17 @@ class ChainLink:
                 self.abi_manager = json.load(f)
             with open("config/abi/uniswap_pool.json", "r") as f:
                 self.abi_pool = json.load(f)
+
+            # self.abi_factory = _load_json_file("config/abi/uniswap_factory.json")
+            # self.abi_router = _load_json_file("config/abi/uniswap_router.json")
+            # self.abi_quoter = _load_json_file("config/abi/uniswap_quoter.json")
+            # self.abi_manager = _load_json_file("config/abi/uniswap_manager.json")
+            # self.abi_pool = _load_json_file("config/abi/uniswap_pool.json")
+
         load_dotenv("private/secrets.env")
-        if wallet == 'test':                                                # set wallet
-            self.address_withdraw = os.getenv("MAIN_ADR")
-            self.address_wallet = os.getenv("WORK_ADR")
-            self.key_wallet = os.getenv("WORK_KEY")
-        elif wallet == 'work':
-            self.address_withdraw = os.getenv("WORK_ADR")
-            self.address_wallet = os.getenv("MAIN_ADR")
-            self.key_wallet = os.getenv("WORK_KEY")
+        self.address_withdraw = os.getenv("MAIN_ADR")
+        self.address_wallet = os.getenv("WORK_ADR")
+        self.key_wallet = os.getenv("WORK_KEY")
         self.rpc = os.getenv(rpc_key)
         self.connection = Web3(Web3.HTTPProvider(self.rpc))                 # connect to node
         if self.connection.is_connected():
@@ -340,13 +374,13 @@ class ChainLink:
         return None
 
 
-    def get_liquidity(self, tick=None, fee=None, retries=5, delay=60):
+    def get_liquidity(self, scaner=None, fee=None, retries=5, delay=60):
         if fee is None:
             fee = self.L_fee
         pool = self.pools.get(fee)
         if pool is None:
             return None
-        if tick is None:
+        if scaner is None:
             for attempt in range(retries):    
                 try:
                     l_row = pool['contract'].functions.liquidity().call()
@@ -372,12 +406,55 @@ class ChainLink:
                     # print(fee0, fee1)
                     return l_row, fee0, fee1
             return None
-        # next part not used
+        # Scanner: collect cumulative net liquidity for 10 and 30 cycles up/down
         else:
-            tick_data = pool['contract'].functions.ticks(tick).call()
-            liquidity_net = tick_data[0]
-            liquidity_gross = tick_data[1]
-            return liquidity_net, liquidity_gross            
+            spacing = pool['spacing']
+            
+            # Align current tick to spacing grid (round to nearest multiple of spacing)
+            aligned_tick = round(self.current_tick / spacing) * spacing
+            
+            # Determine direction multiplier based on pool reversal state
+            # If reversed=True, tick direction is inverted relative to price direction
+            if pool['reversed']:
+                up_direction = -spacing   # UP in price = DOWN in ticks
+                down_direction = spacing  # DOWN in price = UP in ticks
+            else:
+                up_direction = spacing    # UP in price = UP in ticks
+                down_direction = -spacing # DOWN in price = DOWN in ticks
+            
+            # Collect liquidity data in 4 directions
+            liq_up_10 = 0
+            liq_up_30 = 0
+            liq_down_10 = 0
+            liq_down_30 = 0
+            
+            # Scan UP direction (in price terms)
+            for cycle in range(1, 31):
+                tick_to_scan = aligned_tick + (cycle * up_direction)
+                try:
+                    tick_data = pool['contract'].functions.ticks(tick_to_scan).call()
+                    liquidity_net = tick_data[0]
+                    print(f"Tick {tick_to_scan}: liquidity_net = {liquidity_net}")
+                    if cycle <= 10:
+                        liq_up_10 += liquidity_net
+                    liq_up_30 += liquidity_net
+                except Exception as e:
+                    print(f"[UP {cycle}] Error reading tick {tick_to_scan}: {e}")
+            
+            # Scan DOWN direction (in price terms)
+            for cycle in range(1, 31):
+                tick_to_scan = aligned_tick + (cycle * down_direction)
+                try:
+                    tick_data = pool['contract'].functions.ticks(tick_to_scan).call()
+                    liquidity_net = tick_data[0]
+                    print(f"Tick {tick_to_scan}: liquidity_net = {liquidity_net}")
+                    if cycle <= 10:
+                        liq_down_10 += liquidity_net
+                    liq_down_30 += liquidity_net
+                except Exception as e:
+                    print(f"[DOWN {cycle}] Error reading tick {tick_to_scan}: {e}")
+            
+            return liq_up_10, liq_up_30, liq_down_10, liq_down_30            
 
 
     def get_swap_ammount_quoter(self, amount, token, by, fee=None):
@@ -458,8 +535,8 @@ class ChainLink:
             'gas': 300000,
             **tx_opts,
             })
-        status, receipt = self.post_transaction(transaction, wait)
-        if status == 1:
+        hash, receipt = self.post_transaction(transaction, wait)
+        if hash:
             events = pool['contract'].events.Swap().process_receipt(receipt)
             for e in events:
                 amm0 = e["args"]["amount0"]
@@ -473,10 +550,10 @@ class ChainLink:
         else:
             amm0_ok = 0
             amm1_ok = 0
-        return status, amm0_ok, amm1_ok
+        return hash, amm0_ok, amm1_ok
 
 
-    def liq_add(self, range_min, range_max, amount0, amount1, deadline=60, wait=1, fee=None):
+    def liq_mint(self, range_min, range_max, amount0, amount1, deadline=60, wait=1, fee=None):
         print('\n!ADD!', end=' ')
         if fee is None:
             fee = self.L_fee
@@ -518,9 +595,9 @@ class ChainLink:
         'gas': 800000,
         **tx_opts,
         })
-        status, receipt = self.post_transaction(transaction, wait)
+        hash, receipt = self.post_transaction(transaction, wait)
         token_id = amm0_ok = amm1_ok = current_liquidity = 0
-        if status == 1:
+        if hash:
             ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
             for e in self.contract_manager.events.Transfer().process_receipt(receipt):
                 if e["args"]["from"].lower() == ZERO_ADDRESS:
@@ -540,7 +617,61 @@ class ChainLink:
                 current_liquidity = position[7]
             except Exception as e:
                 print(f"[WARN] position({token_id}) read failed: {e}")
-        return status, amm0_ok, amm1_ok, token_id, current_liquidity
+        return hash, amm0_ok, amm1_ok, token_id, current_liquidity
+
+
+
+
+    # REVIEW!
+    def liq_increase(self, token_id, amount0, amount1, deadline=60, wait=1, fee=None):
+        print(f'\n!INCREASE LIQUIDITY! Token ID: {token_id}', end=' ')
+        if fee is None:
+            fee = self.L_fee
+        pool = self.pools.get(fee)
+        if pool is None:
+            return None
+        amount0_scaled = int(amount0 * (10**self.decimals0))
+        amount1_scaled = int(amount1 * (10**self.decimals1))
+        if pool['reversed']:
+            amount0_corrected = amount1_scaled
+            amount1_corrected = amount0_scaled
+        else:
+            amount0_corrected = amount0_scaled
+            amount1_corrected = amount1_scaled
+        tx_opts = self.pre_transaction(gas_price_limit_gwei=self.gas_limit*1.1)
+        params = {
+            "tokenId": token_id,
+            "amount0Desired": amount0_corrected,
+            "amount1Desired": amount1_corrected,
+            "amount0Min": 0,
+            "amount1Min": 0,
+            "deadline": int(time.time()) + deadline,
+        }
+        transaction = self.contract_manager.functions.increaseLiquidity(params).build_transaction({
+            "from": self.address_wallet,
+            'gas': 500000, 
+            **tx_opts,
+        })
+        hash, receipt = self.post_transaction(transaction, wait)
+        amm0_ok = amm1_ok = current_liquidity = 0
+        if hash:
+            for e in self.contract_manager.events.IncreaseLiquidity().process_receipt(receipt):
+                if e["args"]["tokenId"] == token_id:
+                    amm0 = e["args"]["amount0"]
+                    amm1 = e["args"]["amount1"]         
+                    if pool['reversed']:
+                        amm0_ok = amm1 / (10**self.decimals0)
+                        amm1_ok = amm0 / (10**self.decimals1)
+                    else:
+                        amm0_ok = amm0 / (10**self.decimals0)
+                        amm1_ok = amm1 / (10**self.decimals1)
+            try:
+                position = self.contract_manager.functions.positions(token_id).call()
+                current_liquidity = position[7]
+            except Exception as e:
+                print(f"[WARN] position({token_id}) read failed: {e}")
+        return hash, amm0_ok, amm1_ok, current_liquidity
+
 
 
     def liq_remove(self, token_id, deadline=60, wait=1):
@@ -560,8 +691,8 @@ class ChainLink:
         "gas": 310000,
         **tx_opts,
         })
-        status, receipt = self.post_transaction(transaction, wait)
-        if status == 1:
+        hash, receipt = self.post_transaction(transaction, wait)
+        if hash:
             events = self.contract_manager.events.DecreaseLiquidity().process_receipt(receipt)
             position = self.contract_manager.functions.positions(token_id).call()
             fee = position[4]
@@ -580,7 +711,7 @@ class ChainLink:
         else:
             amm0_ok = 0
             amm1_ok = 0
-        return status, amm0_ok, amm1_ok
+        return hash, amm0_ok, amm1_ok
 
 
     def collect(self, token_id, wait=1):
@@ -597,8 +728,8 @@ class ChainLink:
         "gas": 310000,
         **tx_opts,
         })
-        status, receipt = self.post_transaction(transaction, wait)
-        if status == 1:
+        hash, receipt = self.post_transaction(transaction, wait)
+        if hash:
             events = self.contract_manager.events.Collect().process_receipt(receipt)
             position = self.contract_manager.functions.positions(token_id).call()
             fee = position[4]
@@ -617,7 +748,7 @@ class ChainLink:
         else:
             amm0_ok = 0
             amm1_ok = 0
-        return status, amm0_ok, amm1_ok
+        return hash, amm0_ok, amm1_ok
 
 
     def burn(self, token_id, wait=1):
@@ -666,26 +797,27 @@ class ChainLink:
         try:
             signed_transaction = self.connection.eth.account.sign_transaction(transaction, self.key_wallet)
             transaction_hash = self.connection.eth.send_raw_transaction(signed_transaction.raw_transaction)
-            print(f"Hash: {self.connection.to_hex(transaction_hash)}")
+            tx_hash_hex = self.connection.to_hex(transaction_hash)
+            print(f"Hash: {tx_hash_hex}")
             if wait:
                 try:
                     # print("Waiting for transaction receipt...")
                     receipt = self.connection.eth.wait_for_transaction_receipt(transaction_hash, timeout=120, poll_latency=2)
                     if receipt and receipt.get("status") == 1:
                         # print("Done!", receipt.get("blockNumber"))
-                        return 1, receipt
+                        return tx_hash_hex, receipt
                     else:
                         print("Rejected!")
                         return 0, 0
                 except TimeExhausted:
                     print("Timed out!")
-                    return 9, 0
+                    return 0, 0
             else:
                 print('debug: no wait for receipt')
-                return -1, 0
+                return 0, 0
         except (BadResponseFormat, Web3Exception) as e:
             print(f"Web3 error: {e}")
-            return 8, 0
+            return 0, 0
         except Exception as e:
             print(f"Unexpected error: {e}")
-            return 7, 0
+            return 0, 0
